@@ -1,0 +1,10 @@
+{
+  "name": "Remix: AI DOMINATOR",
+  "description": "نظام تشغيل النمو واستخبارات محتوى منشئي المحتوى ومحلل جينوم صانع المحتوى (Creator Genome Cloud)",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

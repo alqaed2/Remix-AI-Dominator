@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI DOMINATOR — Control Console</title>
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+</head>
+
+<body>
+  <!-- Background FX -->
+  <div class="bg">
+    <div class="bg-grid"></div>
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+  </div>
+
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">⚙</div>
+        <div class="brand-text">
+          <div class="brand-title">AI DOMINATOR</div>
+          <div class="brand-sub">Control Console • v12.9</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="forge">
+          <span class="nav-ico">◆</span>
+          <span>مختبر التخليق</span>
+        </button>
+        <button class="nav-item" data-view="jobs">
+          <span class="nav-ico">◈</span>
+          <span>الوظائف</span>
+        </button>
+        <button class="nav-item" data-view="packs">
+          <span class="nav-ico">⬢</span>
+          <span>الحزم</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <span class="nav-ico">⚙</span>
+          <span>الإعدادات</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="status-card">
+          <div class="status-row">
+            <span class="dot" id="readyDot"></span>
+            <span class="muted">الحالة</span>
+            <span class="pill" id="readyText">…</span>
+          </div>
+          <div class="status-row">
+            <span class="muted">آخر Job</span>
+            <span class="mono small" id="lastJob">—</span>
+          </div>
+          <div class="status-row">
+            <span class="muted">آخر Pack</span>
+            <span class="mono small" id="lastPack">—</span>
+          </div>
+          <div class="status-actions">
+            <button class="btn ghost" id="btnRefresh">تحديث</button>
+            <button class="btn ghost" id="btnClear">مسح</button>
+          </div>
+        </div>
+
+        <div class="tiny muted">
+          ملاحظة: هذه واجهة تشغيل Production-Grade بدون Tailwind CDN.
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <!-- Topbar -->
+      <header class="topbar">
+        <div class="crumbs">
+          <span class="muted">DominatorV2</span>
+          <span class="sep">/</span>
+          <span class="strong" id="pageTitle">مختبر التخليق</span>
+        </div>
+
+        <div class="top-actions">
+          <div class="kbdhint">
+            <span class="pill">Ctrl</span> + <span class="pill">Enter</span>
+            <span class="muted">لتشغيل التخليق</span>
+          </div>
+          <a class="btn primary" href="/healthz" target="_blank" rel="noreferrer">Health</a>
+        </div>
+      </header>
+
+      <!-- Views -->
+      <section class="views">
+        <!-- View: Forge -->
+        <div class="view active" id="view-forge">
+          <div class="grid-2">
+            <!-- Left column: inputs -->
+            <div class="stack">
+              <div class="card">
+                <div class="card-head">
+                  <div>
+                    <div class="card-title">إدخال سيادي</div>
+                    <div class="card-sub">اختر: نيش أو رابط. ثم اصنع Pack متعدد المنصات.</div>
+                  </div>
+                  <div class="badge">SIC • Alchemy</div>
+                </div>
+
+                <div class="form">
+                  <div class="row">
+                    <label class="seg">
+                      <input type="radio" name="mode" value="niche" checked />
+                      <span>نيش</span>
+                    </label>
+                    <label class="seg">
+                      <input type="radio" name="mode" value="url" />
+                      <span>رابط</span>
+                    </label>
+                  </div>
+
+                  <div class="field">
+                    <label class="label" id="inputLabel">اكتب النيش</label>
+                    <textarea id="inputValue" class="textarea" rows="3"
+                      placeholder="مثال: التسويق بالذكاء الاصطناعي لشركات المقاولات"></textarea>
+                    <div class="hint">
+                      Tip: استخدم ترند/هاشتاق داخل النيش لتعزيز Trend-fit.
+                    </div>
+                  </div>
+
+                  <div class="row">
+                    <div class="field">
+                      <label class="label">اللغة</label>
+                      <select id="language" class="select">
+                        <option value="ar" selected>العربية</option>
+                        <option value="en">English</option>
+                      </select>
+                    </div>
+
+                    <div class="field">
+                      <label class="label">النبرة</label>
+                      <select id="tone" class="select">
+                        <option value="authority" selected>Authority (سيادي)</option>
+                        <option value="tactical">Tactical (تنفيذي)</option>
+                        <option value="contrarian">Contrarian (صادم)</option>
+                        <option value="story">Story (سردي)</option>
+                        <option value="ceo">CEO (قيادي)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="field">
+                    <label class="label">المنصات</label>
+                    <div class="chips">
+                      <label class="chip"><input type="checkbox" value="linkedin" checked />LinkedIn</label>
+                      <label class="chip"><input type="checkbox" value="x" checked />X</label>
+                      <label class="chip"><input type="checkbox" value="tiktok" checked />TikTok</label>
+                    </div>
+                  </div>
+
+                  <div class="row">
+                    <label class="toggle">
+                      <input type="checkbox" id="includeVisual" checked />
+                      <span class="toggle-ui"></span>
+                      <span class="toggle-text">توليد أصل بصري (Visual Sovereignty)</span>
+                    </label>
+
+                    <label class="toggle">
+                      <input type="checkbox" id="syncMode" />
+                      <span class="toggle-ui"></span>
+                      <span class="toggle-text">تشغيل Sync (للتجربة فقط)</span>
+                    </label>
+                  </div>
+
+                  <div class="actions">
+                    <button class="btn primary wide" id="btnForge">
+                      <span class="spark">✦</span>
+                      Forge Dominance Pack
+                    </button>
+                    <button class="btn ghost" id="btnTrending">جلب الترندات</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head">
+                  <div>
+                    <div class="card-title">رادار الترندات</div>
+                    <div class="card-sub">اضغط أي هاشتاق لإضافته بسرعة داخل النيش.</div>
+                  </div>
+                  <div class="badge subtle" id="trendsStatus">Idle</div>
+                </div>
+
+                <div class="trendbox" id="trendsBox">
+                  <div class="muted">اضغط "جلب الترندات" لعرض القائمة.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right column: output -->
+            <div class="stack">
+              <div class="card">
+                <div class="card-head">
+                  <div>
+                    <div class="card-title">لوحة التنفيذ</div>
+                    <div class="card-sub">متابعة Job + عرض Pack + نسخ سريع.</div>
+                  </div>
+                  <div class="badge" id="jobBadge">—</div>
+                </div>
+
+                <div class="jobbar">
+                  <div class="job-meta">
+                    <div class="mono small" id="jobId">job: —</div>
+                    <div class="mono small" id="packId">pack: —</div>
+                  </div>
+                  <div class="progress">
+                    <div class="progress-fill" id="progressFill" style="width:0%"></div>
+                  </div>
+                  <div class="job-meta">
+                    <div class="muted small" id="jobStatus">status: idle</div>
+                    <div class="muted small" id="jobEta">polling: off</div>
+                  </div>
+                </div>
+
+                <div class="tabs">
+                  <button class="tab active" data-tab="tab-pack">Pack</button>
+                  <button class="tab" data-tab="tab-genes">Genes</button>
+                  <button class="tab" data-tab="tab-visual">Visual</button>
+                  <button class="tab" data-tab="tab-score">Score</button>
+                  <button class="tab" data-tab="tab-raw">Raw</button>
+                </div>
+
+                <div class="tabpanes">
+                  <div class="tabpane active" id="tab-pack">
+                    <div class="outgrid">
+                      <div class="outcard">
+                        <div class="outhead">
+                          <div class="outtitle">LinkedIn</div>
+                          <button class="btn tiny" data-copy="linkedin">Copy</button>
+                        </div>
+                        <pre class="pre" id="outLinkedIn">—</pre>
+                      </div>
+
+                      <div class="outcard">
+                        <div class="outhead">
+                          <div class="outtitle">X</div>
+                          <button class="btn tiny" data-copy="x">Copy</button>
+                        </div>
+                        <pre class="pre" id="outX">—</pre>
+                      </div>
+
+                      <div class="outcard">
+                        <div class="outhead">
+                          <div class="outtitle">TikTok</div>
+                          <button class="btn tiny" data-copy="tiktok">Copy</button>
+                        </div>
+                        <pre class="pre" id="outTikTok">—</pre>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="tabpane" id="tab-genes">
+                    <div class="outcard">
+                      <div class="outhead">
+                        <div class="outtitle">DNA (Extracted Genes)</div>
+                        <button class="btn tiny" data-copy="genes">Copy</button>
+                      </div>
+                      <pre class="pre" id="outGenes">—</pre>
+                    </div>
+                  </div>
+
+                  <div class="tabpane" id="tab-visual">
+                    <div class="outgrid">
+                      <div class="outcard">
+                        <div class="outhead">
+                          <div class="outtitle">Visual Prompt</div>
+                          <button class="btn tiny" data-copy="vprompt">Copy</button>
+                        </div>
+                        <pre class="pre" id="outVPrompt">—</pre>
+                      </div>
+
+                      <div class="outcard">
+                        <div class="outhead">
+                          <div class="outtitle">Generated Image</div>
+                          <a class="btn tiny" id="openImage" href="#" target="_blank" rel="noreferrer">Open</a>
+                        </div>
+                        <div class="imgbox" id="imgBox">
+                          <div class="muted">—</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="tabpane" id="tab-score">
+                    <div class="outcard">
+                      <div class="outhead">
+                        <div class="outtitle">Dominance Score</div>
+                        <button class="btn tiny" data-copy="score">Copy</button>
+                      </div>
+                      <div class="score">
+                        <div class="score-big">
+                          <span id="scoreNum">—</span>
+                          <span class="muted small">/ 100</span>
+                        </div>
+                        <div class="score-meta">
+                          <div class="pill" id="scoreRec">—</div>
+                          <div class="muted small" id="scoreWhy">—</div>
+                        </div>
+                      </div>
+                      <pre class="pre" id="outScore">—</pre>
+                    </div>
+                  </div>
+
+                  <div class="tabpane" id="tab-raw">
+                    <div class="outcard">
+                      <div class="outhead">
+                        <div class="outtitle">Raw JSON</div>
+                        <button class="btn tiny" data-copy="raw">Copy</button>
+                      </div>
+                      <pre class="pre" id="outRaw">—</pre>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="footer-actions">
+                  <button class="btn ghost" id="btnFetchLast">تحميل آخر نتيجة</button>
+                  <button class="btn ghost" id="btnStopPoll">إيقاف Polling</button>
+                </div>
+              </div>
+
+              <div class="card subtle">
+                <div class="card-head">
+                  <div>
+                    <div class="card-title">قواعد التشغيل</div>
+                    <div class="card-sub">منصة Jobs + Tick (GitHub Actions) جاهزة. لا يوجد ضغط على request.</div>
+                  </div>
+                </div>
+                <ul class="bullets">
+                  <li>كل طلب Forge يرجع <span class="mono">job_id</span> فورًا.</li>
+                  <li>الواجهة تعمل Polling وتُحمّل <span class="mono">pack</span> عند الجاهزية.</li>
+                  <li>ترندات: fallback آمن إذا Apify غير مهيأ.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- View: Jobs -->
+        <div class="view" id="view-jobs">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Jobs</div>
+                <div class="card-sub">هذه الصفحة ستكون لوحة مراقبة وظائف متقدمة (قريبًا).</div>
+              </div>
+            </div>
+            <div class="muted">حاليًا نستخدم polling على job_id مباشرة.</div>
+          </div>
+        </div>
+
+        <!-- View: Packs -->
+        <div class="view" id="view-packs">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Packs</div>
+                <div class="card-sub">هذه الصفحة ستكون أرشيف الحزم (قريبًا).</div>
+              </div>
+            </div>
+            <div class="muted">حاليًا يمكنك تحميل pack عبر pack_id أو “تحميل آخر نتيجة”.</div>
+          </div>
+        </div>
+
+        <!-- View: Settings -->
+        <div class="view" id="view-settings">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Settings</div>
+                <div class="card-sub">إعدادات الواجهة فقط. إعدادات السيرفر من Render Env.</div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label class="label">Polling Interval (ms)</label>
+                <input class="input" id="pollInterval" type="number" min="800" step="200" value="2000" />
+                <div class="hint">افتراضيًا 2000ms. لا تقلل كثيرًا لتجنب rate limit.</div>
+              </div>
+              <div class="field">
+                <label class="label">Max Poll Attempts</label>
+                <input class="input" id="pollMax" type="number" min="10" step="5" value="90" />
+                <div class="hint">افتراضيًا 90 محاولة (~3 دقائق).</div>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button class="btn primary" id="btnSaveUi">حفظ إعدادات الواجهة</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

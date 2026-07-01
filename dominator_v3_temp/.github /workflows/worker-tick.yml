@@ -1,0 +1,34 @@
+name: worker-tick
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Warm up service
+        env:
+          BASE_URL: ${{ secrets.DOMINATOR_BASE_URL }}
+        run: |
+          curl -fsS --max-time 45 "$BASE_URL/healthz" >/dev/null
+          echo "Warm-up OK"
+
+      - name: Kick jobs (non-blocking)
+        env:
+          BASE_URL: ${{ secrets.DOMINATOR_BASE_URL }}
+          TOKEN: ${{ secrets.WORKER_TICK_TOKEN }}
+        run: |
+          if [ -z "$BASE_URL" ] || [ -z "$TOKEN" ]; then
+            echo "Missing secrets: DOMINATOR_BASE_URL or WORKER_TICK_TOKEN"
+            exit 1
+          fi
+
+          echo "Kicking: $BASE_URL/internal/worker-tick?limit=1"
+          curl -fsS --max-time 20 \
+            -X POST "$BASE_URL/internal/worker-tick?limit=1" \
+            -H "X-Worker-Token: $TOKEN" \
+            -H "Content-Type: application/json"
+          echo ""
