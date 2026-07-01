@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { PrismaClient } from '@prisma/client';
 
 export interface User {
   id: string;
@@ -67,6 +68,22 @@ export interface NicheGenome {
   topDeliveryTone: string;
   bestPublishHour: number;
   bestPublishDay: string;
+}
+
+// Initialize Prisma Client
+let prisma: PrismaClient | null = null;
+const isPrismaEnabled = !!process.env.DATABASE_URL && process.env.DATABASE_URL.trim() !== "";
+
+if (isPrismaEnabled) {
+  try {
+    prisma = new PrismaClient();
+    console.log("[Prisma Client] Initialized successfully using PostgreSQL datasource.");
+  } catch (error) {
+    console.error("[Prisma Client] Failed to initialize Prisma Client:", error);
+    prisma = null;
+  }
+} else {
+  console.log("[Prisma Client] DATABASE_URL is not set. Running in file-based fallback mode.");
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -405,7 +422,7 @@ const INITIAL_DB: DatabaseSchema = {
   ]
 };
 
-// Ensure data folder and file exists
+// Ensure data folder and file exists for fallback database
 function initDB() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -435,46 +452,324 @@ function writeDB(data: DatabaseSchema) {
   }
 }
 
+// Global, type-safe database handler that supports PostgreSQL/Prisma & falls back to JSON DB
 export const db = {
-  getUsers: () => readDB().users,
-  addUser: (user: User) => {
+  getUsers: async (): Promise<User[]> => {
+    if (prisma) {
+      try {
+        const prismaUsers = await prisma.user.findMany();
+        return prismaUsers.map(u => ({
+          id: u.id,
+          email: u.email,
+          passwordHash: u.passwordHash,
+          createdAt: u.createdAt.toISOString()
+        }));
+      } catch (e) {
+        console.error("[Prisma DB Error] getUsers failed, falling back to JSON DB:", e);
+      }
+    }
+    return readDB().users;
+  },
+
+  addUser: async (user: User): Promise<User> => {
+    if (prisma) {
+      try {
+        const created = await prisma.user.create({
+          data: {
+            id: user.id,
+            email: user.email,
+            passwordHash: user.passwordHash,
+            createdAt: new Date(user.createdAt)
+          }
+        });
+        return {
+          id: created.id,
+          email: created.email,
+          passwordHash: created.passwordHash,
+          createdAt: created.createdAt.toISOString()
+        };
+      } catch (e) {
+        console.error("[Prisma DB Error] addUser failed, falling back to JSON DB:", e);
+      }
+    }
     const data = readDB();
     data.users.push(user);
     writeDB(data);
     return user;
   },
 
-  getCreatorProfiles: () => readDB().creatorProfiles,
-  getCreatorProfileByUserId: (userId: string) => {
+  getCreatorProfiles: async (): Promise<CreatorProfile[]> => {
+    if (prisma) {
+      try {
+        const profiles = await prisma.creatorProfile.findMany();
+        return profiles.map(p => ({
+          id: p.id,
+          userId: p.userId,
+          followerCount: p.followerCount,
+          niche: p.niche as any,
+          country: p.country,
+          language: p.language,
+          createdAt: p.createdAt.toISOString()
+        }));
+      } catch (e) {
+        console.error("[Prisma DB Error] getCreatorProfiles failed, falling back to JSON DB:", e);
+      }
+    }
+    return readDB().creatorProfiles;
+  },
+
+  getCreatorProfileByUserId: async (userId: string): Promise<CreatorProfile | null> => {
+    if (prisma) {
+      try {
+        const p = await prisma.creatorProfile.findUnique({
+          where: { userId }
+        });
+        if (p) {
+          return {
+            id: p.id,
+            userId: p.userId,
+            followerCount: p.followerCount,
+            niche: p.niche as any,
+            country: p.country,
+            language: p.language,
+            createdAt: p.createdAt.toISOString()
+          };
+        }
+        return null;
+      } catch (e) {
+        console.error("[Prisma DB Error] getCreatorProfileByUserId failed, falling back to JSON DB:", e);
+      }
+    }
     const profiles = readDB().creatorProfiles;
     return profiles.find(p => p.userId === userId) || null;
   },
-  addCreatorProfile: (profile: CreatorProfile) => {
+
+  addCreatorProfile: async (profile: CreatorProfile): Promise<CreatorProfile> => {
+    if (prisma) {
+      try {
+        // Ensure user_1 exists in DB first for multi-tenant relations
+        const existingUser = await prisma.user.findUnique({ where: { id: profile.userId } });
+        if (!existingUser) {
+          await prisma.user.create({
+            data: {
+              id: profile.userId,
+              email: profile.userId === "user_1" ? "creator@dominator.ai" : `user_${profile.userId}@dominator.ai`,
+              passwordHash: "hashed_password",
+              createdAt: new Date()
+            }
+          });
+        }
+
+        const upserted = await prisma.creatorProfile.upsert({
+          where: { userId: profile.userId },
+          update: {
+            followerCount: profile.followerCount,
+            niche: profile.niche,
+            country: profile.country,
+            language: profile.language,
+            createdAt: new Date(profile.createdAt)
+          },
+          create: {
+            id: profile.id,
+            userId: profile.userId,
+            followerCount: profile.followerCount,
+            niche: profile.niche,
+            country: profile.country,
+            language: profile.language,
+            createdAt: new Date(profile.createdAt)
+          }
+        });
+        return {
+          id: upserted.id,
+          userId: upserted.userId,
+          followerCount: upserted.followerCount,
+          niche: upserted.niche as any,
+          country: upserted.country,
+          language: upserted.language,
+          createdAt: upserted.createdAt.toISOString()
+        };
+      } catch (e) {
+        console.error("[Prisma DB Error] addCreatorProfile failed, falling back to JSON DB:", e);
+      }
+    }
     const data = readDB();
-    // Prevent duplicate user profiles
     data.creatorProfiles = data.creatorProfiles.filter(p => p.userId !== profile.userId);
     data.creatorProfiles.push(profile);
     writeDB(data);
     return profile;
   },
 
-  getVideos: (creatorId: string) => {
+  getVideos: async (creatorId: string): Promise<Video[]> => {
+    if (prisma) {
+      try {
+        const vids = await prisma.video.findMany({
+          where: { creatorId }
+        });
+        return vids.map(v => ({
+          id: v.id,
+          creatorId: v.creatorId,
+          title: v.title,
+          hookStyle: v.hookStyle as any,
+          deliveryTone: v.deliveryTone as any,
+          duration: v.duration,
+          faceFirstSecond: v.faceFirstSecond,
+          publishHour: v.publishHour,
+          publishDay: v.publishDay as any,
+          createdAt: v.createdAt.toISOString()
+        }));
+      } catch (e) {
+        console.error("[Prisma DB Error] getVideos failed, falling back to JSON DB:", e);
+      }
+    }
     const data = readDB();
     return data.videos.filter(v => v.creatorId === creatorId);
   },
-  addVideo: (video: Video) => {
+
+  addVideo: async (video: Video): Promise<Video> => {
+    if (prisma) {
+      try {
+        const created = await prisma.video.create({
+          data: {
+            id: video.id,
+            creatorId: video.creatorId,
+            title: video.title,
+            hookStyle: video.hookStyle,
+            deliveryTone: video.deliveryTone,
+            duration: video.duration,
+            faceFirstSecond: video.faceFirstSecond,
+            publishHour: video.publishHour,
+            publishDay: video.publishDay,
+            createdAt: new Date(video.createdAt)
+          }
+        });
+        return {
+          id: created.id,
+          creatorId: created.creatorId,
+          title: created.title,
+          hookStyle: created.hookStyle as any,
+          deliveryTone: created.deliveryTone as any,
+          duration: created.duration,
+          faceFirstSecond: created.faceFirstSecond,
+          publishHour: created.publishHour,
+          publishDay: created.publishDay as any,
+          createdAt: created.createdAt.toISOString()
+        };
+      } catch (e) {
+        console.error("[Prisma DB Error] addVideo failed, falling back to JSON DB:", e);
+      }
+    }
     const data = readDB();
     data.videos.push(video);
     writeDB(data);
     return video;
   },
 
-  getMetrics: (videoId: string) => {
+  getMetrics: async (videoId: string): Promise<VideoMetrics | null> => {
+    if (prisma) {
+      try {
+        const m = await prisma.videoMetrics.findUnique({
+          where: { videoId }
+        });
+        if (m) {
+          return {
+            id: m.id,
+            videoId: m.videoId,
+            views: m.views,
+            likes: m.likes,
+            comments: m.comments,
+            shares: m.shares,
+            saves: m.saves,
+            watchTimeSeconds: m.watchTimeSeconds,
+            completionRatePercentage: m.completionRatePercentage,
+            status: m.status as any,
+            error: m.error || undefined,
+            createdAt: m.createdAt.toISOString()
+          };
+        }
+        return null;
+      } catch (e) {
+        console.error("[Prisma DB Error] getMetrics failed, falling back to JSON DB:", e);
+      }
+    }
     const data = readDB();
     return data.videoMetrics.find(m => m.videoId === videoId) || null;
   },
-  getAllMetrics: () => readDB().videoMetrics,
-  addMetrics: (metrics: VideoMetrics) => {
+
+  getAllMetrics: async (): Promise<VideoMetrics[]> => {
+    if (prisma) {
+      try {
+        const ms = await prisma.videoMetrics.findMany();
+        return ms.map(m => ({
+          id: m.id,
+          videoId: m.videoId,
+          views: m.views,
+          likes: m.likes,
+          comments: m.comments,
+          shares: m.shares,
+          saves: m.saves,
+          watchTimeSeconds: m.watchTimeSeconds,
+          completionRatePercentage: m.completionRatePercentage,
+          status: m.status as any,
+          error: m.error || undefined,
+          createdAt: m.createdAt.toISOString()
+        }));
+      } catch (e) {
+        console.error("[Prisma DB Error] getAllMetrics failed, falling back to JSON DB:", e);
+      }
+    }
+    return readDB().videoMetrics;
+  },
+
+  addMetrics: async (metrics: VideoMetrics): Promise<VideoMetrics> => {
+    if (prisma) {
+      try {
+        const upserted = await prisma.videoMetrics.upsert({
+          where: { videoId: metrics.videoId },
+          update: {
+            views: metrics.views,
+            likes: metrics.likes,
+            comments: metrics.comments,
+            shares: metrics.shares,
+            saves: metrics.saves,
+            watchTimeSeconds: metrics.watchTimeSeconds,
+            completionRatePercentage: metrics.completionRatePercentage,
+            status: metrics.status,
+            error: metrics.error || null,
+            createdAt: new Date(metrics.createdAt)
+          },
+          create: {
+            id: metrics.id,
+            videoId: metrics.videoId,
+            views: metrics.views,
+            likes: metrics.likes,
+            comments: metrics.comments,
+            shares: metrics.shares,
+            saves: metrics.saves,
+            watchTimeSeconds: metrics.watchTimeSeconds,
+            completionRatePercentage: metrics.completionRatePercentage,
+            status: metrics.status,
+            error: metrics.error || null,
+            createdAt: new Date(metrics.createdAt)
+          }
+        });
+        return {
+          id: upserted.id,
+          videoId: upserted.videoId,
+          views: upserted.views,
+          likes: upserted.likes,
+          comments: upserted.comments,
+          shares: upserted.shares,
+          saves: upserted.saves,
+          watchTimeSeconds: upserted.watchTimeSeconds,
+          completionRatePercentage: upserted.completionRatePercentage,
+          status: upserted.status as any,
+          error: upserted.error || undefined,
+          createdAt: upserted.createdAt.toISOString()
+        };
+      } catch (e) {
+        console.error("[Prisma DB Error] addMetrics failed, falling back to JSON DB:", e);
+      }
+    }
     const data = readDB();
     data.videoMetrics = data.videoMetrics.filter(m => m.videoId !== metrics.videoId);
     data.videoMetrics.push(metrics);
@@ -482,30 +777,245 @@ export const db = {
     return metrics;
   },
 
-  getCreatorDNA: (creatorId: string) => {
+  getCreatorDNA: async (creatorId: string): Promise<CreatorDNATrait[]> => {
+    if (prisma) {
+      try {
+        const dna = await prisma.creatorDNATrait.findMany({
+          where: { creatorId }
+        });
+        if (dna.length > 0) {
+          return dna.map(d => ({
+            id: d.id,
+            creatorId: d.creatorId,
+            traitType: d.traitType as any,
+            traitName: d.traitName,
+            traitValue: d.traitValue,
+            confidenceScore: d.confidenceScore,
+            sampleSize: d.sampleSize,
+            impactOnViews: d.impactOnViews,
+            impactOnCompletion: d.impactOnCompletion,
+            updatedAt: d.updatedAt.toISOString()
+          }));
+        }
+        
+        // Dynamic fallback and compilation
+        const allVids = await prisma.video.findMany({ where: { creatorId } });
+        const videoIds = allVids.map(v => v.id);
+        const allMets = await prisma.videoMetrics.findMany({
+          where: { videoId: { in: videoIds }, status: "PROCESSED" }
+        });
+
+        const mappedSchema: DatabaseSchema = {
+          users: [],
+          creatorProfiles: [],
+          videos: allVids.map(v => ({
+            id: v.id,
+            creatorId: v.creatorId,
+            title: v.title,
+            hookStyle: v.hookStyle as any,
+            deliveryTone: v.deliveryTone as any,
+            duration: v.duration,
+            faceFirstSecond: v.faceFirstSecond,
+            publishHour: v.publishHour,
+            publishDay: v.publishDay as any,
+            createdAt: v.createdAt.toISOString()
+          })),
+          videoMetrics: allMets.map(m => ({
+            id: m.id,
+            videoId: m.videoId,
+            views: m.views,
+            likes: m.likes,
+            comments: m.comments,
+            shares: m.shares,
+            saves: m.saves,
+            watchTimeSeconds: m.watchTimeSeconds,
+            completionRatePercentage: m.completionRatePercentage,
+            status: m.status as any,
+            error: m.error || undefined,
+            createdAt: m.createdAt.toISOString()
+          })),
+          creatorDNA: [],
+          nicheGenomes: []
+        };
+
+        const calculated = calculateDNAForCreator(creatorId, mappedSchema);
+        return calculated;
+      } catch (e) {
+        console.error("[Prisma DB Error] getCreatorDNA failed, falling back to JSON DB:", e);
+      }
+    }
+
     const data = readDB();
     const dna = data.creatorDNA.filter(d => d.creatorId === creatorId);
     if (dna.length === 0) {
-      // Calculate them dynamically
       const d = calculateDNAForCreator(creatorId, data);
       return d;
     }
     return dna;
   },
-  saveCreatorDNA: (creatorId: string, dna: CreatorDNATrait[]) => {
+
+  saveCreatorDNA: async (creatorId: string, dna: CreatorDNATrait[]): Promise<void> => {
+    if (prisma) {
+      try {
+        await prisma.creatorDNATrait.deleteMany({
+          where: { creatorId }
+        });
+        if (dna.length > 0) {
+          await prisma.creatorDNATrait.createMany({
+            data: dna.map(d => ({
+              id: d.id,
+              creatorId: d.creatorId,
+              traitType: d.traitType,
+              traitName: d.traitName,
+              traitValue: d.traitValue,
+              confidenceScore: d.confidenceScore,
+              sampleSize: d.sampleSize,
+              impactOnViews: d.impactOnViews,
+              impactOnCompletion: d.impactOnCompletion,
+              updatedAt: new Date(d.updatedAt)
+            }))
+          });
+        }
+        return;
+      } catch (e) {
+        console.error("[Prisma DB Error] saveCreatorDNA failed, falling back to JSON DB:", e);
+      }
+    }
     const data = readDB();
     data.creatorDNA = data.creatorDNA.filter(d => d.creatorId !== creatorId);
     data.creatorDNA.push(...dna);
     writeDB(data);
   },
 
-  getNicheGenome: (niche: string) => {
+  getNicheGenome: async (niche: string): Promise<NicheGenome> => {
+    if (prisma) {
+      try {
+        const genome = await prisma.nicheGenome.findFirst({
+          where: { niche: { equals: niche, mode: "insensitive" } }
+        });
+        if (genome) {
+          return {
+            niche: genome.niche,
+            avgViews: genome.avgViews,
+            avgCompletionRate: genome.avgCompletionRate,
+            topHookStyle: genome.topHookStyle,
+            topDeliveryTone: genome.topDeliveryTone,
+            bestPublishHour: genome.bestPublishHour,
+            bestPublishDay: genome.bestPublishDay
+          };
+        }
+      } catch (e) {
+        console.error("[Prisma DB Error] getNicheGenome failed, falling back to JSON DB:", e);
+      }
+    }
     const data = readDB();
     return data.nicheGenomes.find(n => n.niche.toLowerCase() === niche.toLowerCase()) || data.nicheGenomes[0];
   },
-  getAllNicheGenomes: () => readDB().nicheGenomes,
 
-  resetDB: () => {
+  getAllNicheGenomes: async (): Promise<NicheGenome[]> => {
+    if (prisma) {
+      try {
+        const genomes = await prisma.nicheGenome.findMany();
+        if (genomes.length > 0) {
+          return genomes.map(g => ({
+            niche: g.niche,
+            avgViews: g.avgViews,
+            avgCompletionRate: g.avgCompletionRate,
+            topHookStyle: g.topHookStyle,
+            topDeliveryTone: g.topDeliveryTone,
+            bestPublishHour: g.bestPublishHour,
+            bestPublishDay: g.bestPublishDay
+          }));
+        }
+      } catch (e) {
+        console.error("[Prisma DB Error] getAllNicheGenomes failed, falling back to JSON DB:", e);
+      }
+    }
+    return readDB().nicheGenomes;
+  },
+
+  resetDB: async (): Promise<void> => {
+    if (prisma) {
+      try {
+        // Clear all tables for a full clean state
+        await prisma.creatorDNATrait.deleteMany({});
+        await prisma.videoMetrics.deleteMany({});
+        await prisma.video.deleteMany({});
+        await prisma.creatorProfile.deleteMany({});
+        await prisma.user.deleteMany({});
+        await prisma.nicheGenome.deleteMany({});
+
+        // Reseed initial structure
+        await prisma.user.create({
+          data: {
+            id: 'user_1',
+            email: 'creator@dominator.ai',
+            passwordHash: 'hashed_password',
+            createdAt: new Date()
+          }
+        });
+
+        await prisma.creatorProfile.create({
+          data: {
+            id: 'profile_1',
+            userId: 'user_1',
+            followerCount: 24500,
+            niche: 'Tech',
+            country: 'Saudi Arabia',
+            language: 'Arabic',
+            createdAt: new Date()
+          }
+        });
+
+        await prisma.video.createMany({
+          data: INITIAL_DB.videos.map(v => ({
+            id: v.id,
+            creatorId: v.creatorId,
+            title: v.title,
+            hookStyle: v.hookStyle,
+            deliveryTone: v.deliveryTone,
+            duration: v.duration,
+            faceFirstSecond: v.faceFirstSecond,
+            publishHour: v.publishHour,
+            publishDay: v.publishDay,
+            createdAt: new Date(v.createdAt)
+          }))
+        });
+
+        await prisma.videoMetrics.createMany({
+          data: INITIAL_DB.videoMetrics.map(m => ({
+            id: m.id,
+            videoId: m.videoId,
+            views: m.views,
+            likes: m.likes,
+            comments: m.comments,
+            shares: m.shares,
+            saves: m.saves,
+            watchTimeSeconds: m.watchTimeSeconds,
+            completionRatePercentage: m.completionRatePercentage,
+            status: m.status,
+            createdAt: new Date(m.createdAt)
+          }))
+        });
+
+        await prisma.nicheGenome.createMany({
+          data: INITIAL_DB.nicheGenomes.map(g => ({
+            niche: g.niche,
+            avgViews: g.avgViews,
+            avgCompletionRate: g.avgCompletionRate,
+            topHookStyle: g.topHookStyle,
+            topDeliveryTone: g.topDeliveryTone,
+            bestPublishHour: g.bestPublishHour,
+            bestPublishDay: g.bestPublishDay
+          }))
+        });
+
+        console.log("[Prisma Client] Database successfully reset and seeded.");
+        return;
+      } catch (e) {
+        console.error("[Prisma DB Error] resetDB failed, falling back to JSON DB:", e);
+      }
+    }
     writeDB(INITIAL_DB);
   }
 };

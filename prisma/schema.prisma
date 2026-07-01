@@ -1,0 +1,84 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String          @id @default(uuid())
+  email        String          @unique
+  passwordHash String
+  createdAt    DateTime        @default(now())
+  profile      CreatorProfile?
+}
+
+model CreatorProfile {
+  id            String             @id @default(uuid())
+  userId        String             @unique
+  followerCount Int
+  niche         String             // e.g. "Tech", "Business", "Fitness", "Lifestyle", "Cooking"
+  country       String
+  language      String
+  createdAt     DateTime           @default(now())
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videos        Video[]
+  dnaTraits     CreatorDNATrait[]
+}
+
+model Video {
+  id              String         @id @default(uuid())
+  creatorId       String
+  title           String
+  hookStyle       String         // "Shocking Statement", "Visual Pattern", etc.
+  deliveryTone    String         // "Energetic", "Educational/Calm", etc.
+  duration        Int            // in seconds
+  faceFirstSecond Boolean
+  publishHour     Int            // 0-23
+  publishDay      String         // "Monday", "Tuesday", etc.
+  createdAt       DateTime       @default(now())
+  creator         CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  metrics         VideoMetrics?
+}
+
+model VideoMetrics {
+  id                       String   @id @default(uuid())
+  videoId                  String   @unique
+  views                    Int
+  likes                    Int
+  comments                 Int
+  shares                   Int
+  saves                    Int
+  watchTimeSeconds         Float
+  completionRatePercentage Float
+  status                   String   // "QUEUED", "PROCESSED", "FAILED"
+  error                    String?
+  createdAt                DateTime @default(now())
+  video                    Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+}
+
+model CreatorDNATrait {
+  id                 String         @id @default(uuid())
+  creatorId          String
+  traitType          String         // "Content", "Hook", "Delivery", "Visual", "Timing"
+  traitName          String
+  traitValue         String
+  confidenceScore    Float
+  sampleSize         Int
+  impactOnViews      Float
+  impactOnCompletion Float
+  updatedAt          DateTime       @updatedAt
+  creator            CreatorProfile @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+}
+
+model NicheGenome {
+  niche             String @id // Primary Key: "Tech", "Business", etc.
+  avgViews          Float
+  avgCompletionRate Float
+  topHookStyle      String
+  topDeliveryTone   String
+  bestPublishHour   Int
+  bestPublishDay    String
+}

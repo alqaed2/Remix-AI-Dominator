@@ -1,0 +1,42 @@
+import { Express } from "express";
+import getProfileRoute from "./getProfile.route";
+import updateProfileRoute from "./updateProfile.route";
+import getDnaRoute from "./getDna.route";
+import resetDbRoute from "./resetDb.route";
+import getGenomesRoute from "./getGenomes.route";
+import getGrowthHistoryRoute from "./getGrowthHistory.route";
+import analyzeUrlRoute from "./analyzeUrl.route";
+import uploadScreenshotRoute from "./uploadScreenshot.route";
+import updateMetricsRoute from "./updateMetrics.route";
+import predictScriptRoute from "./predictScript.route";
+import getDailyMissionRoute from "./getDailyMission.route";
+import remixTopicRoute from "./remixTopic.route";
+import tacticalExecuteRoute from "./tacticalExecute.route";
+import generateImageRoute from "./generateImage.route";
+import buildPackRoute from "./buildPack.route";
+import getJobRoute from "./getJob.route";
+import getPackRoute from "./getPack.route";
+import trendingHashtagsRoute from "./trendingHashtags.route";
+import readyzRoute from "./readyz.route";
+
+export function registerRoutes(app: Express) {
+  app.use(getProfileRoute);
+  app.use(updateProfileRoute);
+  app.use(getDnaRoute);
+  app.use(resetDbRoute);
+  app.use(getGenomesRoute);
+  app.use(getGrowthHistoryRoute);
+  app.use(analyzeUrlRoute);
+  app.use(uploadScreenshotRoute);
+  app.use(updateMetricsRoute);
+  app.use(predictScriptRoute);
+  app.use(getDailyMissionRoute);
+  app.use(remixTopicRoute);
+  app.use(tacticalExecuteRoute);
+  app.use(generateImageRoute);
+  app.use(buildPackRoute);
+  app.use(getJobRoute);
+  app.use(getPackRoute);
+  app.use(trendingHashtagsRoute);
+  app.use(readyzRoute);
+}

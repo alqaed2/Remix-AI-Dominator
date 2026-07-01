@@ -2608,6 +2608,7 @@ export default function App() {
                               comments: 10,
                               shares: 5,
                               saves: 20,
+                              watchTimeSeconds: 525,
                               completionRatePercentage: 35,
                               status: "PROCESSED"
                             }

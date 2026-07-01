@@ -636,6 +636,15 @@ OUTPUT STRICTLY JSON:
   }
 }
 
+export function savePack(id: string, type: "REELS_ENGINE" | "VIRAL_ATTACK", data: DominatorPack) {
+  packs[id] = {
+    id,
+    type,
+    data,
+    created_at: new Date().toISOString()
+  };
+}
+
 // Background builder job manager
 export function createJob(niche: string, mode: "REELS_ENGINE" | "VIRAL_ATTACK", style?: string, promptOnly: boolean = false): string {
   const jobId = `job_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -649,41 +658,19 @@ export function createJob(niche: string, mode: "REELS_ENGINE" | "VIRAL_ATTACK", 
     created_at: new Date().toISOString()
   };
 
-  // Trigger non-blocking async task execution
-  (async () => {
-    try {
-      const currentJob = jobs[jobId];
-      currentJob.status = "processing";
-      currentJob.progress = 15;
-
-      const updateProgress = (progress: number, logLine: string) => {
-        currentJob.progress = progress;
-        currentJob.logs.push(logLine);
-        console.log(`[Job ${jobId}][${progress}%] ${logLine}`);
-      };
-
-      const data = await generateWarhead(niche, mode, style, updateProgress, false, promptOnly);
-
-      // Save generated pack
-      packs[packId] = {
-        id: packId,
-        type: mode,
-        data,
-        created_at: new Date().toISOString()
-      };
-
-      currentJob.progress = 100;
-      currentJob.status = "done";
-      currentJob.pack_id = packId;
-      currentJob.logs.push("✅ Mission accomplished! Content pack genetic synthesis complete.");
-    } catch (err: any) {
-      console.error(`[Job ${jobId}] Failed:`, err);
-      const currentJob = jobs[jobId];
-      currentJob.status = "failed";
-      currentJob.error = err?.message || String(err);
-      currentJob.logs.push(`❌ Synthesis Aborted: ${currentJob.error}`);
-    }
-  })();
+  // Enqueue via queueService so that it runs inside a managed background worker (BullMQ / fallback queue)
+  import("./services/queueService").then(({ enqueueTask }) => {
+    enqueueTask("BUILD_PACK", { jobId, packId, niche, mode, style, promptOnly }, { jobId })
+      .catch((err) => {
+        console.error(`[Job ${jobId}] Queue enqueue failed:`, err);
+        const currentJob = jobs[jobId];
+        if (currentJob) {
+          currentJob.status = "failed";
+          currentJob.error = err?.message || String(err);
+          currentJob.logs.push(`❌ Queue Placement Aborted: ${currentJob.error}`);
+        }
+      });
+  });
 
   return jobId;
 }
