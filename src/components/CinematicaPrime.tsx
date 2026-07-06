@@ -191,9 +191,16 @@ export default function CinematicaPrime({ lang, triggerNotification, currentNich
             triggerNotification("error", isAr ? "تجاوزت مهلة معالجة الجينوم الوقت المحدد" : "Genome processing request timed out");
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Polling error:", err);
-        // Retry anyway or fail gracefully after multiple times
+        attempts++;
+        if (attempts < maxAttempts) {
+          timer = setTimeout(checkJobStatus, pollInterval);
+        } else {
+          setJobStatus("failed");
+          setActiveJobId(null);
+          triggerNotification("error", isAr ? "فشل الاتصال مع الخادم وجدولة المهام" : "Failed to establish reliable connection with job controller");
+        }
       }
     };
 

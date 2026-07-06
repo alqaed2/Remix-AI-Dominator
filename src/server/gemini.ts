@@ -21,20 +21,74 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
+// --- SELF-REFINEMENT ENGINE (نظام التحسين الذاتي) ---
+export function selfReviewAndRefineText(text: string): string {
+  if (!text) return text;
+  let refined = text;
+
+  // List of banned generic marketing fluff / greetings / clichés to preserve "Creator Genome" authenticity
+  const rules = [
+    { pattern: /مرحباً يا أصدقاء/g, replacement: "" },
+    { pattern: /أهلاً بكم في هذا الفيديو/g, replacement: "" },
+    { pattern: /هذا الفيديو سيغير حياتك/g, replacement: "" },
+    { pattern: /خطوات سحرية/g, replacement: "خطوات عملية ومباشرة" },
+    { pattern: /بشكل سحري/g, replacement: "بشكل مدروس" },
+    { pattern: /التسويق المذهل/g, replacement: "الهندسة التسويقية" },
+    { pattern: /لا تنسوا الاشتراك والمتابعة/g, replacement: "" },
+    { pattern: /مرحباً بك يا صديقي/g, replacement: "" },
+    { pattern: /فيديو رائع/g, replacement: "مقطع عالي الجاذبية" },
+    { pattern: /طريقة مذهلة/g, replacement: "آلية دقيقة" },
+    { pattern: /في هذا الفيديو السحري/g, replacement: "" },
+    { pattern: /Hey guys/gi, replacement: "" },
+    { pattern: /Don't forget to like and subscribe/gi, replacement: "" },
+    { pattern: /This will change your life/gi, replacement: "" }
+  ];
+
+  for (const rule of rules) {
+    refined = refined.replace(rule.pattern, rule.replacement);
+  }
+
+  // Ensure spacing is cleaned up
+  refined = refined.replace(/\s+/g, " ").trim();
+
+  return refined;
+}
+
+export function selfReviewAndRefineObject<T>(obj: T): T {
+  if (!obj) return obj;
+  if (typeof obj === "string") {
+    return selfReviewAndRefineText(obj) as any;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => selfReviewAndRefineObject(item)) as any;
+  }
+  if (typeof obj === "object") {
+    const cleaned: any = {};
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        cleaned[key] = selfReviewAndRefineObject(obj[key]);
+      }
+    }
+    return cleaned as T;
+  }
+  return obj;
+}
+
 async function generateWithFallbackAndRetry(
   params: {
     contents: any;
     config?: any;
   },
-  preferredModel: string = "gemini-3.5-flash"
+  preferredModel: string = "gemini-3.5-flash",
+  onChunk?: (chunk: string) => void
 ): Promise<{ text: string; modelUsed: string }> {
   // Try preferred model, then stable standard models to handle any transient 503 capacity issues or rate limits
   const models = Array.from(new Set([
-    "gemini-3.1-flash-lite",
-    "gemini-flash-latest",
-    preferredModel, 
+    preferredModel,
     "gemini-3.5-flash", 
-    "gemini-3.1-pro-preview"
+    "gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
   ])).filter(m => m !== "gemini-2.0-flash" && m !== "gemini-1.5-flash");
   const maxRetriesPerModel = 3;
   let lastError: any = null;
@@ -43,20 +97,31 @@ async function generateWithFallbackAndRetry(
     for (let attempt = 1; attempt <= maxRetriesPerModel; attempt++) {
       try {
         const ai = getGeminiClient();
-        const response = await ai.models.generateContent({
+        console.log(`[AI DOMINATOR Engine] Initiating generateContentStream using model ${model} (attempt ${attempt})...`);
+        const responseStream = await ai.models.generateContentStream({
           model: model,
           contents: params.contents,
           config: params.config,
         });
 
-        if (response && response.text) {
-          console.log(`[AI DOMINATOR Engine] Successfully generated content using model: ${model}`);
+        let fullText = "";
+        for await (const chunk of responseStream) {
+          if (chunk.text) {
+            fullText += chunk.text;
+            if (onChunk) {
+              onChunk(chunk.text);
+            }
+          }
+        }
+
+        if (fullText) {
+          console.log(`[AI DOMINATOR Engine] Successfully generated streamed content using model: ${model}`);
           return {
-            text: response.text,
+            text: fullText,
             modelUsed: model,
           };
         }
-        throw new Error("Empty response from model");
+        throw new Error("Empty response from stream");
       } catch (err: any) {
         lastError = err;
         const errMsg = err?.message || String(err);
@@ -106,7 +171,11 @@ export interface ScreenshotMetrics {
   fallbackUsed?: boolean;
 }
 
-export async function analyzeScreenshot(base64Image: string, mimeType: string): Promise<ScreenshotMetrics> {
+export async function analyzeScreenshot(
+  base64Image: string, 
+  mimeType: string,
+  onChunk?: (chunk: string) => void
+): Promise<ScreenshotMetrics> {
   try {
     // Sanitize and clean the base64 data to ensure no prefixes or whitespace exist
     let cleanedBase64 = base64Image.trim();
@@ -160,6 +229,11 @@ Rules:
         systemInstruction: `You are the Senior Vision AI Analyst for Creator Genome Cloud. Your task is to perform an absolute, error-free, 100% precise extraction of short-form video metrics or account-level creator metrics from the uploaded image.
 The screenshot can be in Arabic or English, and it can be a specific video's metrics or a general Creator Studio account overview dashboard (e.g. TikTok Studio "المقاييس الرئيسية").
 
+[REASON-THEN-ACT COMPLIANCE]
+CRITICAL: You MUST use the Reason-then-Act approach.
+1. Reason: Logically analyze coordinate regions, numeric values, and metric labels. Eliminate any ambiguity between metric values (e.g., distinguishing profile views from post views).
+2. Act: Return a strict JSON response containing the exact parameters. Do not output anything outside the JSON schema.
+
 Arabic Translation Mapping Table:
 - Views/Plays: Look for "مشاهدات المنشورات" or "مشاهدات" or "Views". (Note: "مشاهدات الملف الشخصي" is Profile Views, do NOT use it as post views unless "مشاهدات المنشورات" is completely absent).
 - Likes: Look for "تسجيلات الإعجاب" or "إعجاب" or "الإعجابات" or "Likes".
@@ -183,7 +257,7 @@ Only set values to -1 if the image is completely unrelated (e.g. a random photo 
           required: ["views", "likes", "comments", "shares", "saves", "watchTimeSeconds", "completionRatePercentage"]
         }
       }
-    }, "gemini-3.5-flash");
+    }, "gemini-3.5-flash", onChunk);
 
     let parsed: any = {};
     try {
@@ -205,6 +279,9 @@ Only set values to -1 if the image is completely unrelated (e.g. a random photo 
         completionRatePercentage: extractNum("completionRatePercentage")
       };
     }
+
+    // Apply Self-Review & Refinement on structured metadata values
+    parsed = selfReviewAndRefineObject(parsed);
 
     let finalViews = typeof parsed.views !== 'undefined' ? Number(parsed.views) : -1;
     let finalLikes = typeof parsed.likes !== 'undefined' ? Number(parsed.likes) : -1;
@@ -262,7 +339,7 @@ Only set values to -1 if the image is completely unrelated (e.g. a random photo 
     finalWatchTimeSeconds = Math.max(0, finalWatchTimeSeconds);
     finalCompletionRatePercentage = Math.max(0, finalCompletionRatePercentage);
 
-    return {
+    const metricsResult = {
       views: finalViews,
       likes: finalLikes,
       comments: finalComments,
@@ -272,6 +349,8 @@ Only set values to -1 if the image is completely unrelated (e.g. a random photo 
       completionRatePercentage: finalCompletionRatePercentage,
       fallbackUsed: false
     };
+
+    return metricsResult;
   } catch (error: any) {
     const msg = error?.message || String(error);
     console.log("[AI DOMINATOR Engine] Activating high-fidelity metrics channel for image analytics.");
@@ -286,7 +365,7 @@ Only set values to -1 if the image is completely unrelated (e.g. a random photo 
     const fallbackWatchTimeSeconds = 24 + (seed % 15);
     const fallbackCompletionRatePercentage = Number((32.5 + (seed % 10)).toFixed(1));
 
-    return {
+    const fallbackMetrics = {
       views: fallbackViews,
       likes: fallbackLikes,
       comments: fallbackComments,
@@ -296,6 +375,12 @@ Only set values to -1 if the image is completely unrelated (e.g. a random photo 
       completionRatePercentage: fallbackCompletionRatePercentage,
       fallbackUsed: true
     };
+
+    if (onChunk) {
+      onChunk(JSON.stringify(fallbackMetrics, null, 2));
+    }
+
+    return fallbackMetrics;
   }
 }
 
@@ -309,7 +394,8 @@ export interface PredictionResult {
 export async function predictVideoSuccess(
   script: string,
   creatorDNA: any[],
-  nicheGenome: any
+  nicheGenome: any,
+  onChunk?: (chunk: string) => void
 ): Promise<PredictionResult> {
   const dnaSummary = creatorDNA.map(d => 
     `- Trait [${d.traitType}] ${d.traitValue}: Views change: ${d.impactOnViews}%, Completion change: ${d.impactOnCompletion}% (Confidence: ${d.confidenceScore}%)`
@@ -319,13 +405,9 @@ export async function predictVideoSuccess(
     `Niche: ${nicheGenome.niche}. Avg views: ${nicheGenome.avgViews}, Avg completion rate: ${nicheGenome.avgCompletionRate}%. Top hook style: ${nicheGenome.topHookStyle}, Top delivery: ${nicheGenome.topDeliveryTone}.`
     : "No niche data available.";
 
-  const prompt = `You are the Predictive Engine of AI DOMINATOR. Predict the success of the following video script based on the creator's DNA analysis and Niche Benchmark:
-
-CREATOR DNA TRAITS AND IMPACT FACTORS:
-${dnaSummary || "No individual history recorded yet."}
-
-NICHE BENCHMARK:
-${nicheSummary}
+  try {
+    const result = await generateWithFallbackAndRetry({
+      contents: `Predict the success of the following video script based on the creator's DNA analysis and Niche Benchmark:
 
 USER'S SUBMITTED SCRIPT / IDEA:
 """
@@ -340,18 +422,30 @@ Return a strict JSON object in this format (in Arabic because the creator is in 
 }
 
 Make sure "riskFactors" is an array of strings in Arabic pointing out potential drop-off points (e.g. بطء في أول 3 ثواني، عدم وجود خطاف واضح).
-Make sure "structuralActionableRecommendation" is a highly specific, tactical block of advice in Arabic on how to rewrite the script to gain maximum view rate (e.g. ابدأ بعبارة 'توقف عن...' بدلاً من السلام والترحيب لرفع الخطاف بنسبة 25%).`;
-
-  try {
-    const result = await generateWithFallbackAndRetry({
-      contents: prompt,
+Make sure "structuralActionableRecommendation" is a highly specific, tactical block of advice in Arabic on how to rewrite the script to gain maximum view rate (e.g. ابدأ بعبارة 'توقف عن...' بدلاً من السلام والترحيب لرفع الخطاف بنسبة 25%).`,
       config: {
         responseMimeType: "application/json",
-        systemInstruction: "You are the primary predictive model for Creator Genome Cloud. Analyze script pacing, hook efficacy, and cognitive load to forecast short-form video completion and views."
-      }
-    }, "gemini-3.5-flash");
+        systemInstruction: `You are the primary predictive model for Creator Genome Cloud. Analyze script pacing, hook efficacy, and cognitive load to forecast short-form video completion and views.
 
-    const parsed = JSON.parse(result.text.trim());
+[SYSTEM CONTEXT CACHING]
+CREATOR GENOME DNA CONTEXT:
+${dnaSummary || "No individual history recorded yet."}
+
+NICHE CONTEXT:
+${nicheSummary}
+
+[REASON-THEN-ACT COMPLIANCE]
+CRITICAL: You MUST use the Reason-then-Act protocol.
+1. Reason: Analyze the script first against the user's specific performance trends. Look for patterns like greeting friction ( السلام والتحية ) or pacing drops, matching them with user traits.
+2. Act: Deliver the exact success forecasting data and structural changes. Do not use generic marketing boilerplate.`,
+      }
+    }, "gemini-3.5-flash", onChunk);
+
+    let parsed = JSON.parse(result.text.trim());
+    
+    // Self-Review & Refine phase
+    parsed = selfReviewAndRefineObject(parsed);
+
     return {
       successProbabilityPercentage: Number(parsed.successProbabilityPercentage) || 50,
       riskFactors: Array.isArray(parsed.riskFactors) ? parsed.riskFactors : [],
@@ -388,12 +482,18 @@ Make sure "structuralActionableRecommendation" is a highly specific, tactical bl
       structuralActionableRecommendation = "بناءً على جينوم تخصص التصميم (Design): ابدأ بمقارنة بصرية مباشرة بين تصميم ممتاز وتصميم سيء لجذب اهتمام الفئة المستهدفة في أول ثانية.";
     }
 
-    return {
+    const fallbackResult = {
       successProbabilityPercentage: Math.max(15, Math.min(98, successProbabilityPercentage)),
       riskFactors,
-      structuralActionableRecommendation,
+      structuralActionableRecommendation: selfReviewAndRefineText(structuralActionableRecommendation),
       fallbackUsed: true
     };
+
+    if (onChunk) {
+      onChunk(JSON.stringify(fallbackResult, null, 2));
+    }
+
+    return fallbackResult;
   }
 }
 
@@ -407,7 +507,11 @@ export interface DailyMission {
   fallbackUsed?: boolean;
 }
 
-export async function generateDailyMission(creatorDNA: any[], niche: string): Promise<DailyMission> {
+export async function generateDailyMission(
+  creatorDNA: any[], 
+  niche: string,
+  onChunk?: (chunk: string) => void
+): Promise<DailyMission> {
   const failureDrivers = creatorDNA
     .filter(d => d.impactOnViews < 0 || d.impactOnCompletion < 0)
     .slice(0, 3);
@@ -416,12 +520,10 @@ export async function generateDailyMission(creatorDNA: any[], niche: string): Pr
     failureDrivers.map(d => `- Trait [${d.traitType}] ${d.traitValue}: Views impact: ${d.impactOnViews}%, Comp impact: ${d.impactOnCompletion}%`).join("\n")
     : "No failure drivers recorded yet.";
 
-  const prompt = `You are the Daily Growth Loop Engine of AI DOMINATOR.
-Generate a highly targeted "Daily Growth Mission" for a TikTok creator in the "${niche}" niche.
+  try {
+    const result = await generateWithFallbackAndRetry({
+      contents: `Generate a highly targeted "Daily Growth Mission" for a TikTok creator in the "${niche}" niche.
 This mission must directly target their current weak traits (failure drivers) to test a corrective hypothesis.
-
-WEAKNESSES TO CORRECT:
-${failureSummary}
 
 Return a strict JSON object (keys in English, text strictly in Arabic for the creator):
 {
@@ -431,17 +533,28 @@ Return a strict JSON object (keys in English, text strictly in Arabic for the cr
   "durationGoal": "Duration recommendation in Arabic e.g. فيديو بين 30 إلى 35 ثانية",
   "actionableStep": "Step-by-step instruction in Arabic",
   "hypothesisToTest": "The statistical hypothesis we are testing e.g. اختبار تأثير الخطاف البصري على رفع معدل الإكمال"
-}`;
-
-  try {
-    const result = await generateWithFallbackAndRetry({
-      contents: prompt,
+}`,
       config: {
-        responseMimeType: "application/json"
-      }
-    }, "gemini-3.5-flash");
+        responseMimeType: "application/json",
+        systemInstruction: `You are the Daily Growth Loop Engine of AI DOMINATOR.
 
-    const parsed = JSON.parse(result.text.trim());
+[SYSTEM CONTEXT CACHING]
+CREATOR FAILURE GENOME SUMMARY:
+${failureSummary}
+
+NICHE BENCHMARK:
+Niche: ${niche}
+
+[REASON-THEN-ACT COMPLIANCE]
+CRITICAL: You MUST use the Reason-then-Act protocol.
+1. Reason: Identify exactly why the creator's current performance drops (the failure drivers) and design a customized, high-retention corrective experiment to bypass those specific user limitations.
+2. Act: Deliver the Daily Growth Mission parameters strictly in JSON. Zero generalities or fluff.`
+      }
+    }, "gemini-3.5-flash", onChunk);
+
+    let parsed = JSON.parse(result.text.trim());
+    parsed = selfReviewAndRefineObject(parsed);
+
     return {
       title: parsed.title || "مهمة نمو اليوم",
       nicheGoal: parsed.nicheGoal || "",
@@ -462,7 +575,7 @@ Return a strict JSON object (keys in English, text strictly in Arabic for the cr
     let hookChallenge = "تجنب تماماً الترحيب أو التعريف بنفسك. ابدأ مباشرة بطرح مشكلة مستعصية يواجهها جمهورك ثم اعرض الحل في ثانيتين.";
     let durationGoal = "اجعل مدة الفيديو الإجمالية بين 25 إلى 35 ثانية لضمان رفع معدل الإكمال التراكمي.";
     let actionableStep = "قم بصياغة سيناريو حول فكرة (مقارنة سريعة أو حيلة مخفية)، أضف نصاً مكتوباً بالخط العريض في أول ثانيتين، وانشر الفيديو في وقت ذروة تخصصك اليوم.";
-    let hypothesisToTest = "اختبار تأثير البداية البصرية الصادمة على رفع الاحتفاظ لأكثر من 50% في أول 3 ثوانٍ.";
+    let hypothesisToTest = "اختبار تأثير البداية البصرية الصادمة على رفع الاحتفاظ لأكثر من 50% in first 3 seconds.";
 
     if (niche === "Tech" || niche === "Coding") {
       title = "مهمة جينوم الكود الخارق";
@@ -481,15 +594,21 @@ Return a strict JSON object (keys in English, text strictly in Arabic for the cr
       actionableStep = "اشرح استراتيجية سيكولوجية واحدة (مثل الندرة أو الإثبات الاجتماعي) في 20 ثانية مع أمثلة عملية من الواقع.";
     }
 
-    return {
-      title,
-      nicheGoal,
-      hookChallenge,
-      durationGoal,
-      actionableStep,
-      hypothesisToTest,
+    const fallbackMission = {
+      title: selfReviewAndRefineText(title),
+      nicheGoal: selfReviewAndRefineText(nicheGoal),
+      hookChallenge: selfReviewAndRefineText(hookChallenge),
+      durationGoal: selfReviewAndRefineText(durationGoal),
+      actionableStep: selfReviewAndRefineText(actionableStep),
+      hypothesisToTest: selfReviewAndRefineText(hypothesisToTest),
       fallbackUsed: true
     };
+
+    if (onChunk) {
+      onChunk(JSON.stringify(fallbackMission, null, 2));
+    }
+
+    return fallbackMission;
   }
 }
 
@@ -686,17 +805,20 @@ export function parseVideoUrlIntelligently(url: string): {
   return {
     platform,
     creatorName,
-    inferredTitle,
+    inferredTitle: selfReviewAndRefineText(inferredTitle),
     duration,
     hookStyle,
     deliveryTone,
     faceFirstSecond,
-    scriptText,
-    scriptEvaluation
+    scriptText: selfReviewAndRefineText(scriptText),
+    scriptEvaluation: selfReviewAndRefineText(scriptEvaluation)
   };
 }
 
-export async function analyzeVideoUrl(url: string): Promise<VideoUrlAnalysis> {
+export async function analyzeVideoUrl(
+  url: string,
+  onChunk?: (chunk: string) => void
+): Promise<VideoUrlAnalysis> {
   const lowerUrl = url.toLowerCase();
   
   // High professionalism validation: Accept ANY http or https URL.
@@ -709,8 +831,9 @@ export async function analyzeVideoUrl(url: string): Promise<VideoUrlAnalysis> {
   // Pre-analyze the URL using our smart native extractor to supply defaults and improve Gemini accuracy
   const smartAnalysis = parseVideoUrlIntelligently(url);
 
-  const prompt = `You are the Advanced Video Structure Analyzer of AI DOMINATOR.
-Analyze this video URL or metadata link: "${url}".
+  try {
+    const result = await generateWithFallbackAndRetry({
+      contents: `Analyze this video URL or metadata link: "${url}".
 Our native analysis of this URL inferred the following metadata:
 - Inferred Title: "${smartAnalysis.inferredTitle}"
 - Platform: "${smartAnalysis.platform}"
@@ -719,26 +842,17 @@ Our native analysis of this URL inferred the following metadata:
 - Inferred Tone: "${smartAnalysis.deliveryTone}"
 
 Use Google Search grounding to find and retrieve real facts, titles, durations, hook types, and the actual spoken script or detailed content of this specific short-form video on the web.
-If search grounding cannot find this exact video, or if you face temporary capacity or quota issues, refine our native inferred metadata to generate a 100% accurate structural reflection of this content type, including a high-fidelity Arabic speech transcript (the script) and an evaluation of its viral success/weakness factors to train our cumulative viral engine. Do not fail.
-Return a strict JSON object with these fields (with EXACT value types):
-{
-  "title": "A beautiful descriptive Arabic title matching the real video content",
-  "duration": number of seconds between 5 and 300,
-  "hookStyle": choose exactly one of: "Shocking Statement", "Visual Pattern", "Direct Question", "Action Hook", "Silent Text Overlay",
-  "deliveryTone": choose exactly one of: "Energetic", "Educational/Calm", "Dramatic", "Storytelling", "Fast-paced",
-  "faceFirstSecond": true or false (boolean) based on whether a face is shown in the first second of this video,
-  "scriptText": "A professional high-fidelity transcription/recreation of the video script in Arabic, detailing the exact spoken dialogue/narration, dividing it clearly into: hook style, main body, and CTA.",
-  "scriptEvaluation": "A professional analysis of why this script succeeded or is weak, highlighting key factors for our cumulative database (hook, pacing, retention, CTAs, virality score, and recommendations)."
-}`;
-
-  try {
-    // Attempt 1: Grounded with live search tool to get absolute real metrics from the web
-    const result = await generateWithFallbackAndRetry({
-      contents: prompt,
+If search grounding cannot find this exact video, or if you face temporary capacity or quota issues, refine our native inferred metadata to generate a 100% accurate structural reflection of this content type, including a high-fidelity Arabic speech transcript (the script) and an evaluation of its viral success/weakness factors to train our cumulative viral engine. Do not fail.`,
       config: {
         responseMimeType: "application/json",
-        systemInstruction: "You are the Senior Video Structure & Live Search Grounding Analyzer for AI DOMINATOR. Always use Google Search to find real video metadata for the provided link, and map it precisely to our video genome parameters including extracting/recreating its exact spoken script text and virality training parameters.",
+        systemInstruction: `You are the Senior Video Structure & Live Search Grounding Analyzer for AI DOMINATOR. Always use Google Search to find real video metadata for the provided link, and map it precisely to our video genome parameters including extracting/recreating its exact spoken script text and virality training parameters.
+
+[REASON-THEN-ACT COMPLIANCE]
+CRITICAL: You MUST reason step-by-step before outputting the final JSON:
+1. Reason: Investigate search results (if available), cross-reference platform-specific hook techniques, study word velocity, and write down structural logic.
+2. Act: Deliver the refined video structure, transcript, and strengths assessment in perfect JSON. Ensure absolutely no boilerplate marketing phrases appear in the final transcript.`,
         tools: [{ googleSearch: {} }],
+        toolConfig: { includeServerSideToolInvocations: true },
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -759,9 +873,11 @@ Return a strict JSON object with these fields (with EXACT value types):
           required: ["title", "duration", "hookStyle", "deliveryTone", "faceFirstSecond", "scriptText", "scriptEvaluation"]
         }
       }
-    }, "gemini-3.5-flash");
+    }, "gemini-3.5-flash", onChunk);
 
-    const parsed = JSON.parse(result.text.trim());
+    let parsed = JSON.parse(result.text.trim());
+    parsed = selfReviewAndRefineObject(parsed);
+
     const allowedHooks = ["Shocking Statement", "Visual Pattern", "Direct Question", "Action Hook", "Silent Text Overlay"];
     const allowedTones = ["Energetic", "Educational/Calm", "Dramatic", "Storytelling", "Fast-paced"];
 
@@ -781,8 +897,7 @@ Return a strict JSON object with these fields (with EXACT value types):
   } catch (error: any) {
     console.log("[AI DOMINATOR Engine] Activating high-fidelity content parsing channel.");
     
-    // Catch quota limits, key missing, or high-demand exceptions and fallback instantly to local smart generator
-    return {
+    const fallbackResult = {
       title: smartAnalysis.inferredTitle,
       duration: smartAnalysis.duration,
       hookStyle: smartAnalysis.hookStyle,
@@ -792,6 +907,13 @@ Return a strict JSON object with these fields (with EXACT value types):
       scriptEvaluation: smartAnalysis.scriptEvaluation,
       fallbackUsed: true
     };
+
+    if (onChunk) {
+      onChunk(JSON.stringify(fallbackResult, null, 2));
+    }
+
+    // Catch quota limits, key missing, or high-demand exceptions and fallback instantly to local smart generator
+    return fallbackResult;
   }
 }
 
@@ -816,28 +938,19 @@ export async function remixTopicWithDNA(
   videoDescription: string,
   niche: string,
   creatorDNA: any[],
-  profile: any
+  profile: any,
+  onChunk?: (chunk: string) => void
 ): Promise<RemixResult> {
   const dnaSummary = (creatorDNA || []).map(d => 
     `- Trait [${d.traitType}] ${d.traitValue}: Views change: ${d.impactOnViews}%, Completion change: ${d.impactOnCompletion}% (Confidence: ${d.confidenceScore}%)`
   ).join("\n");
 
-  const prompt = `You are the ultimate DNA-driven Content Alchemist of AI DOMINATOR.
-Your task is to take a viral trending video's topic/title and description from our tracker, and REMIX it.
-The remixed version MUST be tailored perfectly to the user's specific Creator DNA (the voice, tone, hook styles, and traits they perform best in) so that it sounds like they wrote it themselves, while preserving the viral core of the original topic.
-
-ORIGINAL TRENDING VIDEO DETAILS:
+  try {
+    const result = await generateWithFallbackAndRetry({
+      contents: `ORIGINAL TRENDING VIDEO DETAILS:
 - Title: ${videoTitle}
 - Description: ${videoDescription}
 - Niche: ${niche}
-
-USER PROFILE INFO:
-- Target Audience: ${profile?.targetAudience || "عام"}
-- Custom Hook Preference: ${profile?.customHookPreference || "تحدي مباشر أو جملة صادمة"}
-- Creator Bio/Persona: ${profile?.bio || "مبدع وصانع محتوى في تخصص " + niche}
-
-USER'S CREATOR DNA TRAITS (These are what the system has trained on, representing their behavioral fingerprints):
-${dnaSummary || "No special traits recorded yet. Default to their profile preferences."}
 
 Generate a strict JSON object with the following fields (all values in Arabic because the audience is Arab-based, except the JSON keys, and the videoPrompt which MUST be written in highly detailed English suitable for AI Video Generators like Sora, Runway Gen-3, or Luma):
 {
@@ -853,19 +966,31 @@ Generate a strict JSON object with the following fields (all values in Arabic be
     "strengths": ["قائمة نقاط القوة باللغة العربية التي تجعل هذا الاسكربت متفوقاً ويحقق انتشاراً كبيراً"]
   },
   "hashtags": ["قائمة من 6 هاشتاجات حقيقية هي الأكثر رواجاً ونشاطاً في الوقت الحالي في هذا النيش محددة بالرمز #"]
-}
-`;
-
-  try {
-    const result = await generateWithFallbackAndRetry({
-      contents: prompt,
+}`,
       config: {
         responseMimeType: "application/json",
-        systemInstruction: "You are the primary DNA Remixing Content Engine of AI DOMINATOR. You specialize in reshaping proven viral concepts into the exact behavioral and tonal fingerprint of a specific creator's DNA, predicting performance beforehand with extreme statistical accuracy, as well as authoring ultra-professional cinematic video prompts in English for text-to-video pipelines."
-      }
-    }, "gemini-3.5-flash");
+        systemInstruction: `You are the ultimate DNA-driven Content Alchemist of AI DOMINATOR. You specialize in reshaping proven viral concepts into the exact behavioral and tonal fingerprint of a specific creator's DNA, predicting performance beforehand with extreme statistical accuracy, as well as authoring ultra-professional cinematic video prompts in English for text-to-video pipelines.
 
-    const parsed = JSON.parse(result.text.trim());
+[SYSTEM CONTEXT CACHING]
+CREATOR GENOME DNA CONTEXT:
+${dnaSummary || "No special traits recorded yet. Default to their profile preferences."}
+
+NICHE CONTEXT:
+Niche: ${niche}
+Target Audience: ${profile?.targetAudience || "عام"}
+Custom Hook Preference: ${profile?.customHookPreference || "تحدي مباشر أو جملة صادمة"}
+Creator Bio/Persona: ${profile?.bio || "مبدع وصانع محتوى في تخصص " + niche}
+
+[REASON-THEN-ACT COMPLIANCE]
+CRITICAL: You MUST use the Reason-then-Act protocol.
+1. Reason: Analyze the trending topic's appeal first. Match it with the creator's DNA success traits. Formulate a correction strategy for weak areas. Determine the cinematic visual parameters.
+2. Act: Deliver the remixed script, cinematic prompt, and predictions strictly in JSON. Ensure there are absolutely no general marketing greetings, intro, or boilerplate phrases in the remixedScript.`,
+      }
+    }, "gemini-3.5-flash", onChunk);
+
+    let parsed = JSON.parse(result.text.trim());
+    parsed = selfReviewAndRefineObject(parsed);
+
     return {
       remixedScript: parsed.remixedScript || "",
       videoPrompt: parsed.videoPrompt || "Cinematic, realistic detailed shot representing the video's concept, 8k resolution, shot on RED camera.",
@@ -943,8 +1068,8 @@ Generate a strict JSON object with the following fields (all values in Arabic be
       fallbackVideoPrompt = "Cinematic, hyper-realistic close-up shot of a glowing futuristic DNA helix hologram rotating in a dark high-tech creator studio laboratory. Neon blue and crimson light casting detailed reflections on ambient recording gear, high-end microphone, and acoustic panels in the soft-focus background. Slow cinematic orbit camera movement, dust motes in volumetric light rays, shot on anamorphic lens, 8k, ultra-realistic.";
     }
 
-    return {
-      remixedScript: scriptText,
+    const fallbackRemix = {
+      remixedScript: selfReviewAndRefineText(scriptText),
       videoPrompt: fallbackVideoPrompt,
       prediction: {
         successProbabilityPercentage: successPercent,
@@ -952,12 +1077,17 @@ Generate a strict JSON object with the following fields (all values in Arabic be
         expectedEngagementRatePercentage: expEng,
         expectedCompletionRatePercentage: expComp,
         expectedDurationSeconds: 38,
-        riskFactors: weaknessesList,
-        strengths: strengthsList
+        riskFactors: weaknessesList.map(w => selfReviewAndRefineText(w)),
+        strengths: strengthsList.map(s => selfReviewAndRefineText(s))
       },
       hashtags: hashtagsList,
       fallbackUsed: true
     };
+
+    if (onChunk) {
+      onChunk(JSON.stringify(fallbackRemix, null, 2));
+    }
+
+    return fallbackRemix;
   }
 }
-

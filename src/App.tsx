@@ -319,33 +319,116 @@ export default function App() {
     }, 1200);
   };
 
+  // High-performance streaming assistant helper
+  const fetchSSE = async (
+    url: string,
+    body: any,
+    onChunk: (text: string) => void,
+    onComplete: (result: any) => void
+  ) => {
+    const response = await fetch(`${url}?stream=true`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream"
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      throw new Error(`SSE failed with status ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const cleanLine = line.trim();
+          if (!cleanLine.startsWith("data: ")) continue;
+
+          const jsonStr = cleanLine.substring(6).trim();
+          if (jsonStr === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.chunk) {
+              onChunk(parsed.chunk);
+            } else if (parsed.result) {
+              onComplete(parsed.result);
+            }
+          } catch (e) {
+            // Safe ignore for incomplete chunks
+          }
+        }
+      }
+    }
+  };
+
   const handleRemixTopic = async (video: TrendingVideo) => {
     setIsRemixing(true);
-    setRemixedResult(null);
+    setRemixedResult({
+      remixedScript: "جاري صياغة الفكرة وتطبيق الجينات الحركية والبصرية...",
+      videoPrompt: "",
+      prediction: {
+        successProbabilityPercentage: 0,
+        expectedViews: 0,
+        expectedEngagementRatePercentage: 0,
+        expectedCompletionRatePercentage: 0,
+        expectedDurationSeconds: 0,
+        riskFactors: [],
+        strengths: []
+      },
+      hashtags: []
+    });
+
+    let fullStreamText = "";
+
     try {
-      const res = await fetch('/api/video/remix-topic', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
+      await fetchSSE(
+        "/api/video/remix-topic",
+        {
           videoTitle: video.title,
           videoDescription: video.description || "",
           niche: video.niche
-        })
-      });
+        },
+        (chunk) => {
+          fullStreamText += chunk;
+          
+          // Parse partial script on-the-fly for real-time visualization
+          const scriptMatch = fullStreamText.match(/"remixedScript"\s*:\s*"([^"]*)/);
+          const currentScript = scriptMatch 
+            ? scriptMatch[1].replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, '"')
+            : "جاري كتابة السيناريو الذكي وبناء الهيكل الفايرل تفصيلياً...\n\n" + fullStreamText.replace(/[{}"]/g, "").trim();
 
-      if (res.ok) {
-        const data = await res.json();
-        setRemixedResult(data);
-        triggerNotification('success', "تم إعادة صياغة (Remix) الموضوع بنجاح وتوليد سيناريو وتنبؤات ذكية!");
-      } else {
-        const err = await res.json();
-        triggerNotification('error', err.error || "فشل ريمكس الموضوع بالذكاء الاصطناعي.");
-      }
-    } catch (error) {
+          const promptMatch = fullStreamText.match(/"videoPrompt"\s*:\s*"([^"]*)/);
+          const currentPrompt = promptMatch
+            ? promptMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"')
+            : "";
+
+          setRemixedResult((prev: any) => ({
+            ...prev,
+            remixedScript: currentScript,
+            videoPrompt: currentPrompt
+          }));
+        },
+        (finalResult) => {
+          setRemixedResult(finalResult);
+        }
+      );
+      triggerNotification("success", "تم إعادة صياغة (Remix) الموضوع بنجاح وتوليد سيناريو وتنبؤات ذكية بالكامل!");
+    } catch (error: any) {
       console.error(error);
-      triggerNotification('error', "خطأ في الاتصال بالسيرفر أثناء معالجة ريمكس الموضوع.");
+      triggerNotification("error", error?.message || "فشل ريمكس الموضوع بالذكاء الاصطناعي.");
     } finally {
       setIsRemixing(false);
     }
@@ -387,36 +470,59 @@ export default function App() {
     }
     
     setIsAnalyzingUrl(true);
+    setVideoMeta(prev => ({
+      ...prev,
+      scriptText: "جاري الاتصال بقنوات الذكاء الاصطناعي وبدء قراءة محتويات الفيديو...",
+      scriptEvaluation: "جاري تحليل الهيكل الهندسي للمقطع..."
+    }));
+
+    let fullStreamText = "";
+
     try {
-      const res = await fetch("/api/video/analyze-url", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
+      await fetchSSE(
+        "/api/video/analyze-url",
+        { url: videoUrl },
+        (chunk) => {
+          fullStreamText += chunk;
+
+          const textMatch = fullStreamText.match(/"scriptText"\s*:\s*"([^"]*)/);
+          const currentText = textMatch
+            ? textMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"')
+            : "جاري كتابة وتلخيص النصوص المستخلصة...\n\n" + fullStreamText.replace(/[{}"]/g, "").trim();
+
+          const evalMatch = fullStreamText.match(/"scriptEvaluation"\s*:\s*"([^"]*)/);
+          const currentEval = evalMatch
+            ? evalMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"')
+            : "";
+
+          const titleMatch = fullStreamText.match(/"title"\s*:\s*"([^"]*)/);
+          const currentTitle = titleMatch ? titleMatch[1] : "";
+
+          setVideoMeta((prev: any) => ({
+            ...prev,
+            title: currentTitle || prev.title,
+            scriptText: currentText,
+            scriptEvaluation: currentEval
+          }));
         },
-        body: JSON.stringify({ url: videoUrl })
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        setVideoMeta(prev => ({
-          ...prev,
-          title: data.title || prev.title,
-          duration: data.duration || prev.duration,
-          hookStyle: data.hookStyle || prev.hookStyle,
-          deliveryTone: data.deliveryTone || prev.deliveryTone,
-          faceFirstSecond: typeof data.faceFirstSecond === 'boolean' ? data.faceFirstSecond : prev.faceFirstSecond,
-          scriptText: data.scriptText || prev.scriptText,
-          scriptEvaluation: data.scriptEvaluation || prev.scriptEvaluation
-        }));
-        triggerNotification('success', "تم تحليل رابط الفيديو واستخراج مواصفات هيكل الفيديو بنجاح عبر الذكاء الاصطناعي!");
-        setInputMode('manual'); // switch or highlight manual review
-      } else {
-        const errorData = await res.json();
-        triggerNotification('error', errorData.error || "فشل تحليل رابط الفيديو بالذكاء الاصطناعي.");
-      }
-    } catch (err) {
+        (data) => {
+          setVideoMeta(prev => ({
+            ...prev,
+            title: data.title || prev.title,
+            duration: data.duration || prev.duration,
+            hookStyle: data.hookStyle || prev.hookStyle,
+            deliveryTone: data.deliveryTone || prev.deliveryTone,
+            faceFirstSecond: typeof data.faceFirstSecond === 'boolean' ? data.faceFirstSecond : prev.faceFirstSecond,
+            scriptText: data.scriptText || prev.scriptText,
+            scriptEvaluation: data.scriptEvaluation || prev.scriptEvaluation
+          }));
+        }
+      );
+      triggerNotification('success', "تم تحليل رابط الفيديو واستخراج مواصفات هيكل الفيديو بنجاح عبر الذكاء الاصطناعي!");
+      setInputMode('manual'); // switch or highlight manual review
+    } catch (err: any) {
       console.error(err);
-      triggerNotification('error', "خطأ في الاتصال بالخادم السحابي أثناء تحليل الرابط.");
+      triggerNotification('error', err?.message || "خطأ في الاتصال بالخادم السحابي أثناء تحليل الرابط.");
     } finally {
       setIsAnalyzingUrl(false);
     }
@@ -758,24 +864,42 @@ export default function App() {
     }
 
     setIsSimulating(true);
-    setPrediction(null);
+    setPrediction({
+      successProbabilityPercentage: 0,
+      riskFactors: ["جاري مراجعة وتحليل بنية السكربت..."],
+      structuralActionableRecommendation: "جاري حساب معامل البقاء وإجراء محاكاة جينية للجمهور..."
+    });
+
+    let fullStreamText = "";
 
     try {
-      const res = await fetch('/api/video/predict-script', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script: scriptInput })
-      });
+      await fetchSSE(
+        "/api/video/predict-script",
+        { script: scriptInput },
+        (chunk) => {
+          fullStreamText += chunk;
 
-      if (res.ok) {
-        const data = await res.json();
-        setPrediction(data);
-        triggerNotification('success', "اكتملت محاكاة الذكاء الاصطناعي وجينوم التخصص بنجاح.");
-      } else {
-        triggerNotification('error', "فشل الاتصال بمحرك التنبؤ السحابي.");
-      }
-    } catch (err) {
-      triggerNotification('error', "خطأ في الاتصال بالشبكة.");
+          const recMatch = fullStreamText.match(/"structuralActionableRecommendation"\s*:\s*"([^"]*)/);
+          const currentRec = recMatch
+            ? recMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"')
+            : "جاري توليد التوصية الهيكلية المناسبة بالكامل...\n\n" + fullStreamText.replace(/[{}"]/g, "").trim();
+
+          const probMatch = fullStreamText.match(/"successProbabilityPercentage"\s*:\s*(\d+)/);
+          const currentProb = probMatch ? Number(probMatch[1]) : 0;
+
+          setPrediction((prev: any) => ({
+            ...prev,
+            structuralActionableRecommendation: currentRec,
+            successProbabilityPercentage: currentProb
+          }));
+        },
+        (finalResult) => {
+          setPrediction(finalResult);
+        }
+      );
+      triggerNotification('success', "اكتملت محاكاة الذكاء الاصطناعي وجينوم التخصص بنجاح.");
+    } catch (err: any) {
+      triggerNotification('error', err?.message || "خطأ في الاتصال بالشبكة.");
     } finally {
       setIsSimulating(false);
     }

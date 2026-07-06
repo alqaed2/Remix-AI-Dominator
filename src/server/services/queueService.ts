@@ -184,8 +184,15 @@ async function executeTaskProcessor(type: TaskType, data: any): Promise<any> {
       }
 
       case "BUILD_PACK": {
-        const { generateWarhead, getJob, getPack } = await import("./../dominatorV3Engine");
+        const { generateWarhead, getJob, savePack } = await import("./../dominatorV3Engine");
         
+        const job = getJob(data.jobId);
+        if (job) {
+          job.status = "processing";
+          job.progress = 10;
+          job.logs.push("⚙️ Starting cinematic genome construction core...");
+        }
+
         // Update job status to processing in dominator engine
         const updateProgress = (progress: number, logLine: string) => {
           const currentJob = getJob(data.jobId);
@@ -196,16 +203,34 @@ async function executeTaskProcessor(type: TaskType, data: any): Promise<any> {
           }
         };
 
-        const resultData = await generateWarhead(
-          data.niche,
-          data.mode,
-          data.style,
-          updateProgress,
-          false,
-          data.promptOnly
-        );
+        try {
+          const resultData = await generateWarhead(
+            data.niche,
+            data.mode,
+            data.style,
+            updateProgress,
+            false,
+            data.promptOnly
+          );
 
-        return resultData;
+          savePack(data.packId, data.mode, resultData);
+          if (job) {
+            job.status = "done";
+            job.progress = 100;
+            job.pack_id = data.packId;
+            job.logs.push("✅ Cinematic Genome synthesis complete! Pack saved successfully.");
+          }
+
+          return resultData;
+        } catch (err: any) {
+          if (job) {
+            job.status = "failed";
+            job.progress = 100;
+            job.logs.push(`❌ Synthesis Failed: ${err?.message || String(err)}`);
+            job.error = err?.message || String(err);
+          }
+          throw err;
+        }
       }
 
       default:
