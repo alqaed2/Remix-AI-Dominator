@@ -9,6 +9,9 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Trust the reverse proxy (Nginx / Cloud Run) to accurately identify client IPs
+  app.set("trust proxy", 1);
+
   // Initialize the background jobs queue system (BullMQ / Redis)
   await initQueueService();
 
