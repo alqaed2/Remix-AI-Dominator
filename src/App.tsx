@@ -187,6 +187,10 @@ export default function App() {
   const [prediction, setPrediction] = useState<PredictionResult | null>(null);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
 
+  // Real-time trending videos state from server API / RapidAPI
+  const [radarVideos, setRadarVideos] = useState<TrendingVideo[]>(TRENDING_VIDEOS_DB);
+  const [radarVideosSource, setRadarVideosSource] = useState<string>("fallback");
+
   // Voice Input State
   const [isListening, setIsListening] = useState<boolean>(false);
   const recognitionRef = useRef<any>(null);
@@ -235,9 +239,9 @@ export default function App() {
     const currentNicheName = profile?.niche || 'Tech';
     
     // Filter database for videos matching user niche
-    let eligibleVideos = TRENDING_VIDEOS_DB.filter(v => v.niche.toLowerCase() === currentNicheName.toLowerCase());
+    let eligibleVideos = radarVideos.filter(v => v.niche.toLowerCase() === currentNicheName.toLowerCase());
     if (eligibleVideos.length === 0) {
-      eligibleVideos = TRENDING_VIDEOS_DB;
+      eligibleVideos = radarVideos;
     }
     
     // Pick a random video
@@ -302,21 +306,42 @@ export default function App() {
     return () => clearInterval(interval);
   }, [systemNotifications, profile]);
 
-  const handleRefreshRadar = () => {
+  const handleRefreshRadar = async () => {
     setIsRadarSearching(true);
-    setTimeout(() => {
-      setIsRadarSearching(false);
+    try {
+      const res = await fetch('/api/video/trending?refresh=true');
+      if (res.ok) {
+        const dataTrending = await res.json();
+        if (dataTrending.success && dataTrending.videos) {
+          setRadarVideos(dataTrending.videos);
+          setRadarVideosSource(dataTrending.source);
+          setLastRadarRefreshTime(new Date());
+          
+          const scanText = lang === 'ar' 
+            ? `تم الاتصال برادار TikTok وجلب مقاطع حقيقية بنجاح! المصدر: ${dataTrending.source === 'rapidapi' ? 'مباشر من RapidAPI' : 'الذاكرة المؤقتة للشبكة'}` 
+            : `Connected to TikTok Radar and fetched real trending videos! Source: ${dataTrending.source === 'rapidapi' ? 'Live RapidAPI' : 'Database Cache'}`;
+          triggerNotification('success', scanText);
+          
+          // Discover a high-affinity remix opportunity on manual scan
+          setTimeout(() => {
+            checkForNewRemixOpportunity(true);
+          }, 600);
+        } else {
+          throw new Error("Invalid response format");
+        }
+      } else {
+        throw new Error("HTTP error");
+      }
+    } catch (err: any) {
+      console.error("Error refreshing radar:", err);
       setLastRadarRefreshTime(new Date());
       const scanText = lang === 'ar' 
-        ? "تم مسح منصات الفيديو القصير والتحليلات الإقليمية وتحديث رادار الهيمنة بنجاح!" 
-        : "Short video platforms and regional metrics scanned successfully! Virality radar updated.";
-      triggerNotification('success', scanText);
-      
-      // Discover a high-affinity remix opportunity on manual scan
-      setTimeout(() => {
-        checkForNewRemixOpportunity(true);
-      }, 600);
-    }, 1200);
+        ? "فشل تحديث البيانات المباشر، تم تحميل البيانات المستقرة من قاعدة البيانات." 
+        : "Direct sync failed. Stable cache loaded from local storage database.";
+      triggerNotification('info', scanText);
+    } finally {
+      setIsRadarSearching(false);
+    }
   };
 
   // High-performance streaming assistant helper
@@ -638,6 +663,16 @@ export default function App() {
       if (resGrowth.ok) {
         const dataGrowth = await resGrowth.json();
         setGrowthHistory(dataGrowth);
+      }
+
+      // 6. Fetch Real-time Trending Videos
+      const resTrending = await fetch('/api/video/trending');
+      if (resTrending.ok) {
+        const dataTrending = await resTrending.json();
+        if (dataTrending.success && dataTrending.videos) {
+          setRadarVideos(dataTrending.videos);
+          setRadarVideosSource(dataTrending.source);
+        }
       }
     } catch (error) {
       console.error("Error loading MVP data:", error);
@@ -1755,6 +1790,18 @@ export default function App() {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold border ${
+                      radarVideosSource === 'rapidapi'
+                        ? 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20'
+                        : radarVideosSource === 'database'
+                        ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                        : 'text-gray-400 bg-gray-500/10 border-gray-500/20'
+                    }`}>
+                      {lang === 'ar' 
+                        ? `${radarVideosSource === 'rapidapi' ? 'مباشر RapidAPI' : radarVideosSource === 'database' ? 'قاعدة بيانات مستقرة' : 'قائمة افتراضية'}`
+                        : `${radarVideosSource === 'rapidapi' ? 'Live RapidAPI' : radarVideosSource === 'database' ? 'Stable Cache DB' : 'Default Preset'}`
+                      }
+                    </span>
                     <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full font-bold">
                       {t.radarLiveTracking}
                     </span>

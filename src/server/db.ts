@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { PrismaClient } from '@prisma/client';
+import { TrendingVideo } from '../data/trendingVideos';
 
 export interface User {
   id: string;
@@ -96,9 +97,11 @@ interface DatabaseSchema {
   videoMetrics: VideoMetrics[];
   creatorDNA: CreatorDNATrait[];
   nicheGenomes: NicheGenome[];
+  trendingVideos?: TrendingVideo[];
 }
 
 const INITIAL_DB: DatabaseSchema = {
+  trendingVideos: [],
   users: [
     {
       id: 'user_1',
@@ -1017,6 +1020,17 @@ export const db = {
       }
     }
     writeDB(INITIAL_DB);
+  },
+
+  getTrendingVideos: async (): Promise<TrendingVideo[]> => {
+    const data = readDB();
+    return data.trendingVideos || [];
+  },
+
+  saveTrendingVideos: async (videos: TrendingVideo[]): Promise<void> => {
+    const data = readDB();
+    data.trendingVideos = videos;
+    writeDB(data);
   }
 };
 

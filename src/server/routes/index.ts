@@ -18,6 +18,7 @@ import getJobRoute from "./getJob.route";
 import getPackRoute from "./getPack.route";
 import trendingHashtagsRoute from "./trendingHashtags.route";
 import readyzRoute from "./readyz.route";
+import getTrendingVideosRoute from "./getTrendingVideos.route";
 
 export function registerRoutes(app: Express) {
   app.use(getProfileRoute);
@@ -39,4 +40,5 @@ export function registerRoutes(app: Express) {
   app.use(getPackRoute);
   app.use(trendingHashtagsRoute);
   app.use(readyzRoute);
+  app.use(getTrendingVideosRoute);
 }
