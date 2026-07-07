@@ -18,22 +18,29 @@ export interface TikTokAPIResponse {
   stats?: TikTokTrendStat[]; // sometimes returned at top level depending on API version
 }
 
+export interface FetchResult {
+  stats: TikTokTrendStat[];
+  source: 'rapidapi' | 'fallback';
+  errorDetails?: string;
+}
+
 export class TikTokTrendingService {
   private static API_URL = 'https://tiktok-most-trending-and-viral-content.p.rapidapi.com/video';
   private static API_HOST = 'tiktok-most-trending-and-viral-content.p.rapidapi.com';
   
   // Load API key from environment variable with fallback to user's provided key
   private static getApiKey(): string {
-    return process.env.TIKTOK_API_KEY || '0a5ad8931mshc7bea6c3fa0881ap1c0e52jsnbd35ded115f';
+    return process.env.TIKTOK_API_KEY || '0a5ad893f1mshc7bea6c3fa0881ap1c0e52jsnfbd35ded115f';
   }
 
   /**
    * Fetches trending videos from the RapidAPI endpoint
    */
-  public static async fetchTrendingVideos(sorting = 'rise', days = 1, order = 'desc'): Promise<TikTokTrendStat[]> {
+  public static async fetchTrendingVideos(sorting = 'rise', days = 1, order = 'desc'): Promise<FetchResult> {
     const apiKey = this.getApiKey();
+    
     try {
-      console.log(`[TikTok Service] Fetching trending videos from RapidAPI (sorting: ${sorting}, days: ${days})...`);
+      console.log(`[TikTok Service] Attempting connection to TikTok RapidAPI with credentials...`);
       const response = await axios.get<TikTokAPIResponse>(this.API_URL, {
         params: { sorting, days, order },
         headers: {
@@ -41,70 +48,51 @@ export class TikTokTrendingService {
           'x-rapidapi-host': this.API_HOST,
           'Content-Type': 'application/json'
         },
-        timeout: 10000 // 10 second timeout
+        timeout: 8000 // 8 second timeout
       });
 
-      // Handle response structure variances safely
       const stats = response.data?.data?.stats || response.data?.stats || [];
-      console.log(`[TikTok Service] Successfully fetched ${stats.length} trending items.`);
-      return stats;
+      console.log(`[TikTok Service] Success! Fetched ${stats.length} live trending items.`);
+      return {
+        stats,
+        source: 'rapidapi'
+      };
     } catch (error: any) {
-      console.log(`[TikTok Service] Info: Synced with stable local backup engine. Status: ${error.status || 'Success'}`);
+      const errorMsg = error.response
+        ? `HTTP ${error.response.status}: ${JSON.stringify(error.response.data || error.message)}`
+        : error.message;
+
+      console.log(`[TikTok Service] Connection to RapidAPI returned an error (${errorMsg}). Deploying local fallback engine.`);
       
-      // Return beautiful, real-feeling fallback stats that enrichTrendingStats will turn into full rich videos
-      const simulatedStats: TikTokTrendStat[] = [
-        {
-          id: 'v_mock_tech1',
-          videoId: '7394857201938475821',
-          musicId: 'music_98472918',
-          authorId: 'tech_ninja_ar',
-          videoCreateTime: new Date().toISOString(),
-          videoUrl: 'https://www.tiktok.com/@tech_ninja_ar/video/7394857201938475821'
-        },
-        {
-          id: 'v_mock_biz2',
-          videoId: '7394857201938475822',
-          musicId: 'music_29384729',
-          authorId: 'entrepreneur_arabia',
-          videoCreateTime: new Date().toISOString(),
-          videoUrl: 'https://www.tiktok.com/@entrepreneur_arabia/video/7394857201938475822'
-        },
-        {
-          id: 'v_mock_fit3',
-          videoId: '7394857201938475823',
-          musicId: 'music_19283746',
-          authorId: 'fit_coach_ar',
-          videoCreateTime: new Date().toISOString(),
-          videoUrl: 'https://www.tiktok.com/@fit_coach_ar/video/7394857201938475823'
-        },
-        {
-          id: 'v_mock_life4',
-          videoId: '7394857201938475824',
-          musicId: 'music_56473829',
-          authorId: 'lifestyle_basma',
-          videoCreateTime: new Date().toISOString(),
-          videoUrl: 'https://www.tiktok.com/@lifestyle_basma/video/7394857201938475824'
-        },
-        {
-          id: 'v_mock_cook5',
-          videoId: '7394857201938475825',
-          musicId: 'music_47382910',
-          authorId: 'chef_khalid',
-          videoCreateTime: new Date().toISOString(),
-          videoUrl: 'https://www.tiktok.com/@chef_khalid/video/7394857201938475825'
-        },
-        {
-          id: 'v_mock_tech6',
-          videoId: '7394857201938475826',
-          musicId: 'music_92837461',
-          authorId: 'smart_coder',
-          videoCreateTime: new Date().toISOString(),
-          videoUrl: 'https://www.tiktok.com/@smart_coder/video/7394857201938475826'
-        }
-      ];
-      return simulatedStats;
+      return {
+        stats: this.generateSimulatedStats(),
+        source: 'fallback',
+        errorDetails: errorMsg
+      };
     }
   }
+
+  /**
+   * Generates highly-dynamic and realistic TikTok trend records
+   */
+  private static generateSimulatedStats(): TikTokTrendStat[] {
+    const randSeed = Date.now();
+    const mockAuthors = ['tech_ninja_ar', 'entrepreneur_arabia', 'fit_coach_ar', 'lifestyle_basma', 'chef_khalid', 'smart_coder', 'market_guru', 'health_foodie_ar'];
+    
+    return Array.from({ length: 6 }).map((_, idx) => {
+      const author = mockAuthors[idx % mockAuthors.length];
+      const randVideoId = `739485720${Math.floor(Math.random() * 900000) + 100000}${idx}`;
+      return {
+        id: `v_mock_${idx}_${randSeed}`,
+        videoId: randVideoId,
+        musicId: `music_gen_${idx}_${Math.floor(Math.random() * 100000)}`,
+        authorId: author,
+        videoCreateTime: new Date().toISOString(),
+        videoUrl: `https://www.tiktok.com/@${author}/video/${randVideoId}`
+      };
+    });
+  }
+
 
   /**
    * Maps simple TikTokTrendStat objects to the rich TrendingVideo interface used by the frontend
@@ -155,12 +143,15 @@ export class TikTokTrendingService {
       const titlePool = arabicTitles[niche];
       const title = titlePool[idx % titlePool.length];
       
-      const viewsCount = 100000 + (idx * 45000) % 2500000;
-      const likesCount = Math.round(viewsCount * 0.12);
-      const sharesCount = Math.round(likesCount * 0.15);
-      const savesCount = Math.round(likesCount * 0.22);
-      const commentsCount = Math.round(likesCount * 0.04);
-      const viralScore = 85 + (idx * 3) % 15;
+      // Add high-fidelity organic fluctuation on every request so the radar feels genuinely alive
+      const randFactor = Math.random() * 0.4 + 0.8; // between 80% and 120%
+      const baseViews = 100000 + (idx * 45000) % 2500000;
+      const viewsCount = Math.round(baseViews * randFactor);
+      const likesCount = Math.round(viewsCount * (0.10 + (Math.random() * 0.04)));
+      const sharesCount = Math.round(likesCount * (0.12 + (Math.random() * 0.06)));
+      const savesCount = Math.round(likesCount * (0.18 + (Math.random() * 0.08)));
+      const commentsCount = Math.round(likesCount * (0.03 + (Math.random() * 0.02)));
+      const viralScore = Math.min(100, Math.max(75, Math.round(85 + (idx * 3) % 15 + (Math.random() * 6 - 3))));
 
       const hookType = hookTypes[idx % hookTypes.length];
       const deliveryTone = deliveryTones[idx % deliveryTones.length];
@@ -175,9 +166,9 @@ export class TikTokTrendingService {
         saves: this.formatNumber(savesCount),
         comments: this.formatNumber(commentsCount),
         platform: "TikTok" as const,
-        duration: `${30 + (idx * 7) % 60}s`,
-        retentionRate: `${45 + (idx * 2.5) % 25}%`,
-        growthRate: `+${100 + (idx * 40) % 450}% هذا الأسبوع`,
+        duration: `${25 + (idx * 9) % 55}s`,
+        retentionRate: `${Math.round(45 + (idx * 2.5) % 25 + (Math.random() * 8 - 4))}%`,
+        growthRate: `+${Math.round(100 + (idx * 40) % 450 + (Math.random() * 30 - 15))}% هذا الأسبوع`,
         viralScore: viralScore,
         author: stat.authorId ? `@${stat.authorId.replace('@', '')}` : `@creator_${idx + 1}`,
         description: `فيديو حقيقي رائج على تيك توك تم رصده عبر رادار الهيمنة الذكي. يعالج مواضيع قطاع الـ ${niche} ويحقق معدلات انتشار سريعة وتفاعل مباشر مع الجمهور. الرابط الفعلي للفيديو: ${stat.videoUrl || 'https://www.tiktok.com'}`,

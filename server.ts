@@ -12,9 +12,9 @@ async function startTikTokSync() {
     const existing = await db.getTrendingVideos();
     if (existing.length === 0) {
       const { TikTokTrendingService } = await import("./src/server/services/tiktok.service");
-      const stats = await TikTokTrendingService.fetchTrendingVideos('rise', 1, 'desc');
-      if (stats && stats.length > 0) {
-        const enriched = TikTokTrendingService.enrichTrendingStats(stats);
+      const result = await TikTokTrendingService.fetchTrendingVideos('rise', 1, 'desc');
+      if (result.stats && result.stats.length > 0) {
+        const enriched = TikTokTrendingService.enrichTrendingStats(result.stats);
         await db.saveTrendingVideos(enriched);
         console.log(`[TikTok Sync] Initial cache primed with ${enriched.length} trending videos.`);
       }
@@ -32,9 +32,9 @@ async function startTikTokSync() {
       console.log("[TikTok Sync] Running scheduled 12-hour TikTok trending sync...");
       const { db } = await import("./src/server/db");
       const { TikTokTrendingService } = await import("./src/server/services/tiktok.service");
-      const stats = await TikTokTrendingService.fetchTrendingVideos('rise', 1, 'desc');
-      if (stats && stats.length > 0) {
-        const enriched = TikTokTrendingService.enrichTrendingStats(stats);
+      const result = await TikTokTrendingService.fetchTrendingVideos('rise', 1, 'desc');
+      if (result.stats && result.stats.length > 0) {
+        const enriched = TikTokTrendingService.enrichTrendingStats(result.stats);
         await db.saveTrendingVideos(enriched);
         console.log(`[TikTok Sync] Scheduled sync completed. Cached ${enriched.length} videos.`);
       }

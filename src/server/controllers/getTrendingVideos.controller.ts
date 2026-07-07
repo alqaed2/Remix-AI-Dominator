@@ -14,24 +14,30 @@ export async function getTrendingVideosController(req: Request, res: Response) {
     if (videos.length === 0 || forceRefresh) {
       try {
         console.log(`[Trending Controller] Fetching fresh TikTok videos (forceRefresh: ${forceRefresh})...`);
-        const stats = await TikTokTrendingService.fetchTrendingVideos('rise', 1, 'desc');
+        const result = await TikTokTrendingService.fetchTrendingVideos('rise', 1, 'desc');
         
-        if (stats && stats.length > 0) {
-          const enriched = TikTokTrendingService.enrichTrendingStats(stats);
-          await db.saveTrendingVideos(enriched);
-          videos = enriched;
-          source = "rapidapi";
-          console.log(`[Trending Controller] Cache successfully updated with ${enriched.length} videos.`);
+        if (result.stats && result.stats.length > 0) {
+          const enriched = TikTokTrendingService.enrichTrendingStats(result.stats);
+          
+          if (result.source === 'rapidapi') {
+            await db.saveTrendingVideos(enriched);
+            videos = enriched;
+            source = "rapidapi";
+            console.log(`[Trending Controller] Cache successfully updated with ${enriched.length} live videos.`);
+          } else {
+            videos = enriched;
+            source = "fallback";
+            console.log(`[Trending Controller] Served dynamic high-fidelity simulation. Details: ${result.errorDetails || 'None'}`);
+          }
         } else {
-          console.log("[Trending Controller] No stats returned from API. Using existing cache or fallback.");
+          console.log("[Trending Controller] No stats returned from service. Using existing cache or pre-baked DB.");
           if (videos.length === 0) {
             videos = TRENDING_VIDEOS_DB;
             source = "fallback";
           }
         }
       } catch (apiError: any) {
-        console.log("[Trending Controller] Notice: Switched seamlessly to stable offline database.");
-        // On failure, if database already has cached items, use them, otherwise use pre-baked DB
+        console.log("[Trending Controller] Unexpected sync error, falling back gracefully:", apiError.message);
         if (videos.length === 0) {
           videos = TRENDING_VIDEOS_DB;
           source = "fallback";
