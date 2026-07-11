@@ -10,7 +10,7 @@ function getGeminiClient(): GoogleGenAI {
       throw new Error("GEMINI_API_KEY_MISSING");
     }
     aiClient = new GoogleGenAI({
-      apiKey: key,
+      apiKey: key.trim().replace(/^["']|["']$/g, ''), // تنظيف علامات التنصيص العشوائية من لوحة التحكم
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
@@ -74,90 +74,76 @@ export function selfReviewAndRefineObject<T>(obj: T): T {
   return obj;
 }
 
+/**
+ * محرك التوليد الاحترافي متعدد الموديلات الحصين ضد الفشل المتتالي
+ */
 async function generateWithFallbackAndRetry(
-  params: {
-    contents: any;
-    config?: any;
-  },
+  params: { contents: any; config?: any; },
   preferredModel: string = "gemini-3.5-flash",
   onChunk?: (chunk: string) => void
 ): Promise<{ text: string; modelUsed: string }> {
-  // Try preferred model, then stable standard models to handle any transient 503 capacity issues or rate limits
-  const models = Array.from(new Set([
+  
+  // هندسة مصفوفة النخبة: مرتبة تصاعدياً من الموديل الأقوى والأذكى تحليلياً إلى الموديلات الأسرع والاحتياطية
+  // تصفية أي موديلات ملغية أو قديمة للامتثال لمتطلبات المنصة الأمنية
+  const eliteModels = Array.from(new Set([
     preferredModel,
-    "gemini-3.5-flash", 
-    "gemini-3.1-pro-preview",
-    "gemini-3.1-flash-lite",
-    "gemini-flash-latest"
-  ])).filter(m => m !== "gemini-2.0-flash" && m !== "gemini-1.5-flash");
-  const maxRetriesPerModel = 3;
+    "gemini-3.5-pro",           // الأقوى عالمياً في التفكير والمنطق المعقد لابتكار المهام والسيناريوهات الاستراتيجية
+    "gemini-3.5-flash",         // الموديل الافتراضي الفائق والتنافسي للمنصة
+    "gemini-2.5-pro",           // محرك التحليل المعمق للبيانات الكبيرة واستخراج المؤشرات الهيكلية
+    "gemini-2.5-flash",         // فلاش المطور عالي السرعة والاعتمادية والكفاءة
+    "gemini-2.0-pro-exp-02-05"  // النموذج التجريبي العميق لحل الاختناقات الفكرية
+  ])).filter(m => m && m !== "gemini-2.0-flash" && m !== "gemini-1.5-flash" && m !== "gemini-1.5-pro" && m !== "gemini-pro");
+
   let lastError: any = null;
 
-  for (const model of models) {
-    for (let attempt = 1; attempt <= maxRetriesPerModel; attempt++) {
-      try {
-        const ai = getGeminiClient();
-        console.log(`[AI DOMINATOR Engine] Initiating generateContentStream using model ${model} (attempt ${attempt})...`);
-        const responseStream = await ai.models.generateContentStream({
-          model: model,
-          contents: params.contents,
-          config: params.config,
-        });
+  for (const model of eliteModels) {
+    try {
+      const ai = getGeminiClient();
+      console.log(`[AI DOMINATOR Engine] Principal Router: Allocating pipeline to model [${model}]...`);
 
-        let fullText = "";
-        for await (const chunk of responseStream) {
-          if (chunk.text) {
-            fullText += chunk.text;
-            if (onChunk) {
-              onChunk(chunk.text);
-            }
-          }
-        }
+      // تشغيل الطلب المائي (Stream) ووضعه في سباق وقتي (Race) لإنقاذه من التعليق السحابي
+      const streamPromise = ai.models.generateContentStream({
+        model: model,
+        contents: params.contents,
+        config: params.config,
+      });
 
-        if (fullText) {
-          console.log(`[AI DOMINATOR Engine] Successfully generated streamed content using model: ${model}`);
-          return {
-            text: fullText,
-            modelUsed: model,
-          };
-        }
-        throw new Error("Empty response from stream");
-      } catch (err: any) {
-        lastError = err;
-        const errMsg = err?.message || String(err);
-        
-        // If it's an API key missing error, we don't need to retry, fail immediately
-        if (errMsg.includes("GEMINI_API_KEY_MISSING") || errMsg.includes("API_KEY")) {
-          throw err;
-        }
+      // حد أقصى 8 ثوانٍ لاستجابة الموديل الأولية قبل التجاوز والتحويل الذكي
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`LocalTimeout: Model ${model} failed response window.`)), 8000)
+      );
 
-        // If a model is denied access (e.g. preview model 403), switch to standard model candidate rather than failing immediately
-        const isPermissionDenied = errMsg.includes("PERMISSION_DENIED") || errMsg.includes("denied access") || errMsg.includes("403");
-        if (isPermissionDenied) {
-          console.warn(`[AI DOMINATOR Engine] Model ${model} returned permission denied/403. Routing to alternate standard models.`);
-          break; // break out of retry loop for this model, proceed to next model candidate
-        }
+      const responseStream = await Promise.race([streamPromise, timeoutPromise]);
 
-        const isQuotaExceeded = errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("429");
-        console.log(`[AI DOMINATOR Engine] Model ${model} (attempt ${attempt}) is busy. Adjusting channel parameters...`);
-
-        if (isQuotaExceeded) {
-          const match = errMsg.match(/Please retry in ([\d.]+)s/i);
-          let waitMs = match ? Math.ceil(parseFloat(match[1]) * 1000) + 1200 : 4000;
-          if (waitMs > 12000) waitMs = 12000;
-          console.log(`[AI DOMINATOR Engine] Quota Exceeded (429). Adaptive sleep of ${waitMs}ms before retrying ${model}...`);
-          await new Promise((resolve) => setTimeout(resolve, waitMs));
-        } else {
-          // Wait a bit before retrying (backoff) for non-429 transient issues
-          if (attempt < maxRetriesPerModel) {
-            await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
-          }
+      let fullText = "";
+      for await (const chunk of responseStream) {
+        if (chunk.text) {
+          fullText += chunk.text;
+          if (onChunk) onChunk(chunk.text);
         }
       }
+
+      if (fullText) {
+        console.log(`[AI DOMINATOR Engine] Elite Execution Success! Content synthesized via [${model}]`);
+        return { text: fullText, modelUsed: model };
+      }
+      throw new Error("Received empty text frame from backend node.");
+
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = err?.message || String(err);
+      console.warn(`[AI DOMINATOR Engine] Non-Fatal: Model [${model}] bypassed due to: ${errMsg}. Re-routing immediately...`);
+
+      if (errMsg.includes("GEMINI_API_KEY_MISSING") || errMsg.includes("API_KEY")) {
+        throw err; // إذا كان المفتاح مفقوداً لا داعي لإهدار الطاقة والمحاولات
+      }
+      
+      // بمجرد فشل أو انشغال الموديل الحالي، ننتقل فوراً للموديل التالي دون أي تأخير مكرر
+      continue; 
     }
   }
 
-  throw lastError || new Error("All model attempts exhausted");
+  throw lastError || new Error("Critical Failure: All active multi-model clusters are currently unresponsive.");
 }
 
 export interface ScreenshotMetrics {

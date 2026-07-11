@@ -28,9 +28,14 @@ export class TikTokTrendingService {
   private static API_URL = 'https://tiktok-most-trending-and-viral-content.p.rapidapi.com/video';
   private static API_HOST = 'tiktok-most-trending-and-viral-content.p.rapidapi.com';
   
-  // Load API key from environment variable with fallback to user's provided key
   private static getApiKey(): string {
-    return process.env.TIKTOK_API_KEY || '0a5ad893f1mshc7bea6c3fa0881ap1c0e52jsnfbd35ded115f';
+    const envKey = process.env.TIKTOK_API_KEY;
+    if (!envKey || envKey === "MY_TIKTOK_API_KEY" || envKey.trim() === "") {
+      console.log(`[TikTok Service] Warning: TIKTOK_API_KEY absent. Activating core credential fallback.`);
+      return '0a5ad893f1mshc7bea6c3fa0881ap1c0e52jsnfbd35ded115f';
+    }
+    // هندسة الحماية: تنظيف المفتاح تماماً من أي علامات تنصيص مفردة/مزدوجة أو مسافات خفية تسبب الـ 403
+    return envKey.trim().replace(/^["']|["']$/g, '');
   }
 
   /**
@@ -40,29 +45,28 @@ export class TikTokTrendingService {
     const apiKey = this.getApiKey();
     
     try {
-      console.log(`[TikTok Service] Attempting connection to TikTok RapidAPI with credentials...`);
+      console.log(`[TikTok Service] Microservice Request: Injecting cleared credentials to RapidAPI gateway...`);
       const response = await axios.get<TikTokAPIResponse>(this.API_URL, {
         params: { sorting, days, order },
         headers: {
           'x-rapidapi-key': apiKey,
           'x-rapidapi-host': this.API_HOST,
+          'Accept': 'application/json',
           'Content-Type': 'application/json'
         },
-        timeout: 8000 // 8 second timeout
+        timeout: 12000 // رفع سقف التحمل إلى 12 ثانية لتفادي تقلبات السيرفر السحابي
       });
 
       const stats = response.data?.data?.stats || response.data?.stats || [];
-      console.log(`[TikTok Service] Success! Fetched ${stats.length} live trending items.`);
-      return {
-        stats,
-        source: 'rapidapi'
-      };
+      console.log(`[TikTok Service] Infrastructure Integrity: Successfully pulled ${stats.length} live trend streams.`);
+      return { stats, source: 'rapidapi' };
+
     } catch (error: any) {
       const errorMsg = error.response
         ? `HTTP ${error.response.status}: ${JSON.stringify(error.response.data || error.message)}`
         : error.message;
 
-      console.log(`[TikTok Service] Connection to RapidAPI returned an error (${errorMsg}). Deploying local fallback engine.`);
+      console.error(`[TikTok Service] Exception caught (${errorMsg}). Hot-swapping to local dynamic generation matrix.`);
       
       return {
         stats: this.generateSimulatedStats(),
